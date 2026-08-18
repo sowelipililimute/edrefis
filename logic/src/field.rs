@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use hecs::{Entity, World};
 use nanoserde::{DeJson, SerJson};
 
 use crate::{
@@ -104,40 +105,49 @@ pub fn level_to_gravity(level: u32) -> i32 {
     }
 }
 
-impl Field {
-    pub fn new() -> Field {
-        let mut randomizer = Randomizer::new();
+pub fn spawn_field(world: &mut World) -> Entity {
+    let mut randomizer = Randomizer::new();
 
-        Field {
-            well: Well::new(),
-            next: randomizer.next_piece(),
-            level: 0,
-            state: GameState::ActivePiece {
-                piece: randomizer.next_piece(),
-            },
+    world.spawn((Field {
+        well: Well::new(),
+        next: randomizer.next_piece(),
+        level: 0,
+        state: GameState::ActivePiece {
+            piece: randomizer.next_piece(),
+        },
 
-            randomizer,
+        randomizer,
+    },))
+}
+
+pub fn field_system(
+    world: &mut World,
+    inputs: &Inputs,
+    sounds: &mut dyn Sounds,
+    cubes: &mut dyn Cubes,
+) {
+    for field in world.query_mut::<&mut Field>() {
+        if inputs.key_just_pressed(Input::DebugLevel) {
+            field.level += 50;
         }
-    }
-    pub fn update(&mut self, inputs: &Inputs, sounds: &mut dyn Sounds, cubes: &mut dyn Cubes) {
-        match self.state {
+        match field.state {
             GameState::ActivePiece { ref mut piece } => {
-                piece.do_sonic(&self.well, inputs);
-                piece.do_rotate(&self.well, inputs);
-                piece.do_horizontal(&self.well, inputs);
+                piece.do_sonic(&field.well, inputs);
+                piece.do_rotate(&field.well, inputs);
+                piece.do_horizontal(&field.well, inputs);
                 piece.do_gravity(
-                    &self.well,
+                    &field.well,
                     inputs,
-                    level_to_gravity(self.level),
+                    level_to_gravity(field.level),
                     sounds,
                     true,
                 );
 
-                if piece.do_lock(&mut self.well, inputs, sounds) {
-                    let cleared_rows = self.well.do_clear();
+                if piece.do_lock(&mut field.well, inputs, sounds) {
+                    let cleared_rows = field.well.do_clear();
                     if cleared_rows.len() > 0 {
                         sounds.line_clear();
-                        self.level += cleared_rows.len() as u32;
+                        field.level += cleared_rows.len() as u32;
 
                         let ticks_of_line_clear = 41;
                         let rows_to_lower = cleared_rows.iter().map(|x| x.0).collect::<Vec<i32>>();
@@ -148,12 +158,12 @@ impl Field {
                             }
                         }
 
-                        self.state = GameState::ClearDelay {
+                        field.state = GameState::ClearDelay {
                             ticks_remaining: ticks_of_line_clear,
                             rows_to_lower,
                         };
                     } else {
-                        self.state = GameState::PlaceDelay {
+                        field.state = GameState::PlaceDelay {
                             ticks_remaining: 30,
                         };
                     }
@@ -166,8 +176,8 @@ impl Field {
                 *ticks_remaining -= 1;
 
                 if *ticks_remaining == 0 {
-                    self.well.commit_clear(rows_to_lower);
-                    self.state = GameState::PlaceDelay {
+                    field.well.commit_clear(rows_to_lower);
+                    field.state = GameState::PlaceDelay {
                         ticks_remaining: 30,
                     };
                 }
@@ -178,31 +188,31 @@ impl Field {
                 *ticks_remaining -= 1;
                 if *ticks_remaining == 0 {
                     if inputs.key_pressed(Input::CW) {
-                        self.next.rotation = self.next.rotation.cw();
+                        field.next.rotation = field.next.rotation.cw();
                     } else if inputs.key_pressed(Input::CCW) {
-                        self.next.rotation = self.next.rotation.ccw();
+                        field.next.rotation = field.next.rotation.ccw();
                     }
-                    if self.level % 100 != 99 {
-                        self.level += 1;
+                    if field.level % 100 != 99 {
+                        field.level += 1;
                     }
-                    if self
+                    if field
                         .next
-                        .collides_with(&self.well, 0, 0, self.next.rotation)
+                        .collides_with(&field.well, 0, 0, field.next.rotation)
                     {
-                        self.state = GameState::GameOver {
+                        field.state = GameState::GameOver {
                             ticks_remaining: 60 * 5,
                         };
                     } else {
-                        self.next.do_gravity(
-                            &self.well,
+                        field.next.do_gravity(
+                            &field.well,
                             inputs,
-                            level_to_gravity(self.level),
+                            level_to_gravity(field.level),
                             sounds,
                             false,
                         );
-                        self.state = GameState::ActivePiece { piece: self.next };
-                        self.next = self.randomizer.next_piece();
-                        sounds.block_spawn(self.next.color);
+                        field.state = GameState::ActivePiece { piece: field.next };
+                        field.next = field.randomizer.next_piece();
+                        sounds.block_spawn(field.next.color);
                     }
                 }
             }
@@ -213,13 +223,13 @@ impl Field {
 
                 if *ticks_remaining == 0 {
                     let mut randomizer = Randomizer::new();
-                    self.well = Well::new();
-                    self.next = randomizer.next_piece();
-                    self.state = GameState::ActivePiece {
+                    field.well = Well::new();
+                    field.next = randomizer.next_piece();
+                    field.state = GameState::ActivePiece {
                         piece: randomizer.next_piece(),
                     };
-                    self.randomizer = randomizer;
-                    self.level = 0;
+                    field.randomizer = randomizer;
+                    field.level = 0;
                 }
             }
         }

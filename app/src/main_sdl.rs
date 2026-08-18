@@ -1,8 +1,9 @@
 use crate::gpu;
 use crate::graphics_gpu::Graphics;
 use crate::sounds_sdl::ClientSounds;
+use hecs::World;
 use logic::{
-    field::{Field, GameState},
+    field::{field_system, spawn_field, Field, GameState},
     hooks::Cubes,
     input::{Input, InputProvider, Inputs},
     well::WELL_COLS,
@@ -30,6 +31,7 @@ fn input_to_sdl_key(keycode: Input) -> Keycode {
         Input::Right => Keycode::Right,
         Input::CW => Keycode::X,
         Input::CCW => Keycode::Z,
+        Input::DebugLevel => Keycode::C,
     }
 }
 
@@ -96,7 +98,8 @@ pub fn main() -> Result<(), String> {
     }))?;
     let mut graphics = Graphics::new(&mut gpu_state)?;
 
-    let mut field = Field::new();
+    let mut world = World::new();
+    spawn_field(&mut world);
     let mut input_provider = SDLInputs::new();
     let mut inputs = Inputs::new();
 
@@ -126,17 +129,12 @@ pub fn main() -> Result<(), String> {
                             | Keycode::Up
                             | Keycode::Down
                             | Keycode::Left
-                            | Keycode::Right),
+                            | Keycode::Right
+                            | Keycode::C),
                         ),
                     ..
                 } => {
                     input_provider.push_key(x);
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::C),
-                    ..
-                } => {
-                    field.level += 50;
                 }
                 Event::KeyUp {
                     keycode:
@@ -146,7 +144,8 @@ pub fn main() -> Result<(), String> {
                             | Keycode::Up
                             | Keycode::Down
                             | Keycode::Left
-                            | Keycode::Right),
+                            | Keycode::Right
+                            | Keycode::C),
                         ),
                     ..
                 } => {
@@ -161,20 +160,23 @@ pub fn main() -> Result<(), String> {
 
         ticks += 1;
         inputs.tick(ticks, &mut input_provider);
-        field.update(&mut inputs, &mut sounds, &mut cubes);
 
-        match field.state {
-            GameState::ActivePiece { piece, .. } => {
-                graphics.render(
-                    &field,
-                    &field.well,
-                    Some(&piece),
-                    &field.next,
-                    &mut gpu_state,
-                )?;
-            }
-            _ => {
-                graphics.render(&field, &field.well, None, &field.next, &mut gpu_state)?;
+        field_system(&mut world, &inputs, &mut sounds, &mut cubes);
+
+        for field in world.query_mut::<&Field>() {
+            match field.state {
+                GameState::ActivePiece { piece, .. } => {
+                    graphics.render(
+                        &field,
+                        &field.well,
+                        Some(&piece),
+                        &field.next,
+                        &mut gpu_state,
+                    )?;
+                }
+                _ => {
+                    graphics.render(&field, &field.well, None, &field.next, &mut gpu_state)?;
+                }
             }
         }
 

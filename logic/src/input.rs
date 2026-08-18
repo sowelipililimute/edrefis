@@ -21,6 +21,7 @@ pub enum Input {
     Right,
     CW,
     CCW,
+    DebugLevel,
 }
 
 pub struct Inputs {
@@ -36,6 +37,7 @@ pub const INPUTS: &[Input] = &[
     Input::Right,
     Input::CCW,
     Input::CW,
+    Input::DebugLevel,
 ];
 
 impl Inputs {
