@@ -3,13 +3,9 @@
 # SPDX-License-Identifier: CC0-1.0
 
 [workspace]
-members = [ "app",
-    "client",
+members = [
+    "app",
     "logic",
     "nanotime",
-    "server",
 ]
 resolver = "2"
-
-[patch.crates-io]
-quad-net = { path = "./quad-net" }
