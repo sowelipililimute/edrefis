@@ -3,10 +3,11 @@ use crate::graphics_gpu::Graphics;
 use crate::sounds_sdl::ClientSounds;
 use hecs::World;
 use logic::{
-    field::{field_system, spawn_field, Field, GameState},
+    field::{field_system, spawn_field, GameState},
     hooks::Cubes,
     input::{Input, InputProvider, Inputs},
-    well::WELL_COLS,
+    piece::Piece,
+    well::{Well, WELL_COLS},
 };
 use sdl::{event::Event, event::WindowEvent, keyboard::Keycode};
 use sdl3::{self as sdl};
@@ -163,19 +164,13 @@ pub fn main() -> Result<(), String> {
 
         field_system(&mut world, &inputs, &mut sounds, &mut cubes);
 
-        for field in world.query_mut::<&Field>() {
-            match field.state {
-                GameState::ActivePiece { piece, .. } => {
-                    graphics.render(
-                        &field,
-                        &field.well,
-                        Some(&piece),
-                        &field.next,
-                        &mut gpu_state,
-                    )?;
+        for (well, level, state, next) in world.query_mut::<(&Well, &u32, &GameState, &Piece)>() {
+            match state {
+                GameState::ActivePiece { ref piece, .. } => {
+                    graphics.render(*level, well, Some(piece), next, &mut gpu_state)?;
                 }
                 _ => {
-                    graphics.render(&field, &field.well, None, &field.next, &mut gpu_state)?;
+                    graphics.render(*level, well, None, next, &mut gpu_state)?;
                 }
             }
         }

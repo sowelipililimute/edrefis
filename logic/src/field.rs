@@ -30,17 +30,6 @@ pub enum GameState {
     },
 }
 
-#[derive(SerJson, DeJson, Clone)]
-pub struct Field {
-    pub randomizer: Randomizer,
-
-    pub well: Well,
-    pub next: Piece,
-    pub level: u32,
-
-    pub state: GameState,
-}
-
 pub fn level_to_gravity(level: u32) -> i32 {
     if level >= 500 {
         5120
@@ -108,16 +97,15 @@ pub fn level_to_gravity(level: u32) -> i32 {
 pub fn spawn_field(world: &mut World) -> Entity {
     let mut randomizer = Randomizer::new();
 
-    world.spawn((Field {
-        well: Well::new(),
-        next: randomizer.next_piece(),
-        level: 0,
-        state: GameState::ActivePiece {
+    world.spawn((
+        Well::new(),
+        randomizer.next_piece(),
+        0u32,
+        GameState::ActivePiece {
             piece: randomizer.next_piece(),
         },
-
         randomizer,
-    },))
+    ))
 }
 
 pub fn field_system(
@@ -126,28 +114,28 @@ pub fn field_system(
     sounds: &mut dyn Sounds,
     cubes: &mut dyn Cubes,
 ) {
-    for field in world.query_mut::<&mut Field>() {
+    for (well, next, level, state, randomizer) in world.query_mut::<(
+        &mut Well,
+        &mut Piece,
+        &mut u32,
+        &mut GameState,
+        &mut Randomizer,
+    )>() {
         if inputs.key_just_pressed(Input::DebugLevel) {
-            field.level += 50;
+            *level += 50;
         }
-        match field.state {
+        match state {
             GameState::ActivePiece { ref mut piece } => {
-                piece.do_sonic(&field.well, inputs);
-                piece.do_rotate(&field.well, inputs);
-                piece.do_horizontal(&field.well, inputs);
-                piece.do_gravity(
-                    &field.well,
-                    inputs,
-                    level_to_gravity(field.level),
-                    sounds,
-                    true,
-                );
+                piece.do_sonic(&well, inputs);
+                piece.do_rotate(&well, inputs);
+                piece.do_horizontal(&well, inputs);
+                piece.do_gravity(&well, inputs, level_to_gravity(*level), sounds, true);
 
-                if piece.do_lock(&mut field.well, inputs, sounds) {
-                    let cleared_rows = field.well.do_clear();
+                if piece.do_lock(well, inputs, sounds) {
+                    let cleared_rows = well.do_clear();
                     if cleared_rows.len() > 0 {
                         sounds.line_clear();
-                        field.level += cleared_rows.len() as u32;
+                        *level += cleared_rows.len() as u32;
 
                         let ticks_of_line_clear = 41;
                         let rows_to_lower = cleared_rows.iter().map(|x| x.0).collect::<Vec<i32>>();
@@ -158,12 +146,12 @@ pub fn field_system(
                             }
                         }
 
-                        field.state = GameState::ClearDelay {
+                        *state = GameState::ClearDelay {
                             ticks_remaining: ticks_of_line_clear,
                             rows_to_lower,
                         };
                     } else {
-                        field.state = GameState::PlaceDelay {
+                        *state = GameState::PlaceDelay {
                             ticks_remaining: 30,
                         };
                     }
@@ -176,8 +164,8 @@ pub fn field_system(
                 *ticks_remaining -= 1;
 
                 if *ticks_remaining == 0 {
-                    field.well.commit_clear(rows_to_lower);
-                    field.state = GameState::PlaceDelay {
+                    well.commit_clear(rows_to_lower);
+                    *state = GameState::PlaceDelay {
                         ticks_remaining: 30,
                     };
                 }
@@ -188,31 +176,22 @@ pub fn field_system(
                 *ticks_remaining -= 1;
                 if *ticks_remaining == 0 {
                     if inputs.key_pressed(Input::CW) {
-                        field.next.rotation = field.next.rotation.cw();
+                        next.rotation = next.rotation.cw();
                     } else if inputs.key_pressed(Input::CCW) {
-                        field.next.rotation = field.next.rotation.ccw();
+                        next.rotation = next.rotation.ccw();
                     }
-                    if field.level % 100 != 99 {
-                        field.level += 1;
+                    if *level % 100 != 99 {
+                        *level += 1;
                     }
-                    if field
-                        .next
-                        .collides_with(&field.well, 0, 0, field.next.rotation)
-                    {
-                        field.state = GameState::GameOver {
+                    if next.collides_with(&well, 0, 0, next.rotation) {
+                        *state = GameState::GameOver {
                             ticks_remaining: 60 * 5,
                         };
                     } else {
-                        field.next.do_gravity(
-                            &field.well,
-                            inputs,
-                            level_to_gravity(field.level),
-                            sounds,
-                            false,
-                        );
-                        field.state = GameState::ActivePiece { piece: field.next };
-                        field.next = field.randomizer.next_piece();
-                        sounds.block_spawn(field.next.color);
+                        next.do_gravity(&well, inputs, level_to_gravity(*level), sounds, false);
+                        *state = GameState::ActivePiece { piece: *next };
+                        *next = randomizer.next_piece();
+                        sounds.block_spawn(next.color);
                     }
                 }
             }
@@ -222,14 +201,14 @@ pub fn field_system(
                 *ticks_remaining -= 1;
 
                 if *ticks_remaining == 0 {
-                    let mut randomizer = Randomizer::new();
-                    field.well = Well::new();
-                    field.next = randomizer.next_piece();
-                    field.state = GameState::ActivePiece {
-                        piece: randomizer.next_piece(),
+                    let mut new_randomizer = Randomizer::new();
+                    *well = Well::new();
+                    *next = new_randomizer.next_piece();
+                    *state = GameState::ActivePiece {
+                        piece: new_randomizer.next_piece(),
                     };
-                    field.randomizer = randomizer;
-                    field.level = 0;
+                    *randomizer = new_randomizer;
+                    *level = 0;
                 }
             }
         }
