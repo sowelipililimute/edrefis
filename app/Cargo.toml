@@ -28,6 +28,6 @@ wasm-bindgen-futures = "0.4.49"
 console_error_panic_hook = "0.1.7"
 
 [target.'cfg(not(target_family="wasm"))'.dependencies]
-sdl2 = { version = "0.37.0", features = ["mixer", "raw-window-handle"] }
+sdl3 = { version = "0", features = ["mixer", "raw-window-handle", "build-from-source"] }
 pollster = "0.4.0"
 nanotime = { path = "../nanotime" }

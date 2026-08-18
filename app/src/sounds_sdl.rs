@@ -3,21 +3,23 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use logic::{hooks::Sounds, well::Block};
-use sdl2::{self as sdl, mixer::LoaderRWops};
+use sdl3::{
+    iostream::IOStream,
+    mixer::{self, Mixer},
+};
 
-use sdl::mixer::Chunk;
-
-pub struct ClientSounds {
-    lock: Chunk,
-    land: Chunk,
-    lineclear: Chunk,
-    pieces1: Chunk,
-    pieces2: Chunk,
-    pieces3: Chunk,
-    pieces4: Chunk,
-    pieces5: Chunk,
-    pieces6: Chunk,
-    pieces7: Chunk,
+pub struct ClientSounds<'mixer> {
+    track: mixer::Track<'mixer>,
+    lock: mixer::Audio,
+    land: mixer::Audio,
+    lineclear: mixer::Audio,
+    pieces1: mixer::Audio,
+    pieces2: mixer::Audio,
+    pieces3: mixer::Audio,
+    pieces4: mixer::Audio,
+    pieces5: mixer::Audio,
+    pieces6: mixer::Audio,
+    pieces7: mixer::Audio,
 }
 
 const LOCK: &'static [u8] = include_bytes!("audio/lock.wav");
@@ -31,44 +33,50 @@ const PIECES5: &'static [u8] = include_bytes!("audio/pieces5.wav");
 const PIECES6: &'static [u8] = include_bytes!("audio/pieces6.wav");
 const PIECES7: &'static [u8] = include_bytes!("audio/pieces7.wav");
 
-impl Sounds for ClientSounds {
+impl<'mixer> Sounds for ClientSounds<'mixer> {
     fn line_clear(&mut self) {
-        sdl::mixer::Channel::all().play(&self.lineclear, 0).unwrap();
+        self.track.set_audio(&self.lineclear).unwrap();
+        self.track.play().unwrap();
     }
     fn block_spawn(&mut self, color: Block) {
-        sdl::mixer::Channel::all().play(match color {
-            Block::Yellow => &self.pieces1,
-            Block::Blue => &self.pieces2,
-            Block::Orange => &self.pieces3,
-            Block::Green => &self.pieces4,
-            Block::Purple => &self.pieces5,
-            Block::Cyan => &self.pieces6,
-            Block::Red => &self.pieces7,
-        }, 0).unwrap();
+        self.track
+            .set_audio(match color {
+                Block::Yellow => &self.pieces1,
+                Block::Blue => &self.pieces2,
+                Block::Orange => &self.pieces3,
+                Block::Green => &self.pieces4,
+                Block::Purple => &self.pieces5,
+                Block::Cyan => &self.pieces6,
+                Block::Red => &self.pieces7,
+            })
+            .unwrap();
+
+        self.track.play().unwrap();
     }
     fn lock(&mut self) {
-        sdl::mixer::Channel::all().play(&self.lock, 0).unwrap();
+        self.track.set_audio(&self.lock).unwrap();
+        self.track.play().unwrap();
     }
     fn land(&mut self) {
-        sdl::mixer::Channel::all().play(&self.land, 0).unwrap();
+        self.track.set_audio(&self.land).unwrap();
+        self.track.play().unwrap();
     }
 }
 
-impl ClientSounds {
-    pub fn new() -> Result<ClientSounds, String> {
-        Ok(
-            ClientSounds {
-                lock: sdl::rwops::RWops::from_bytes(LOCK)?.load_wav()?,
-                land: sdl::rwops::RWops::from_bytes(LAND)?.load_wav()?,
-                lineclear: sdl::rwops::RWops::from_bytes(LINECLEAR)?.load_wav()?,
-                pieces1: sdl::rwops::RWops::from_bytes(PIECES1)?.load_wav()?,
-                pieces2: sdl::rwops::RWops::from_bytes(PIECES2)?.load_wav()?,
-                pieces3: sdl::rwops::RWops::from_bytes(PIECES3)?.load_wav()?,
-                pieces4: sdl::rwops::RWops::from_bytes(PIECES4)?.load_wav()?,
-                pieces5: sdl::rwops::RWops::from_bytes(PIECES5)?.load_wav()?,
-                pieces6: sdl::rwops::RWops::from_bytes(PIECES6)?.load_wav()?,
-                pieces7: sdl::rwops::RWops::from_bytes(PIECES7)?.load_wav()?,
-            }
-        )
+impl<'mixer> ClientSounds<'mixer> {
+    pub fn new(mix: &'mixer Mixer) -> Result<ClientSounds<'mixer>, sdl3::Error> {
+        Ok(ClientSounds {
+            track: mix.create_track()?,
+            lock: mix.load_audio_io(&IOStream::from_bytes(LOCK)?, false)?,
+            land: mix.load_audio_io(&IOStream::from_bytes(LAND)?, false)?,
+            lineclear: mix.load_audio_io(&IOStream::from_bytes(LINECLEAR)?, false)?,
+            pieces1: mix.load_audio_io(&IOStream::from_bytes(PIECES1)?, false)?,
+            pieces2: mix.load_audio_io(&IOStream::from_bytes(PIECES2)?, false)?,
+            pieces3: mix.load_audio_io(&IOStream::from_bytes(PIECES3)?, false)?,
+            pieces4: mix.load_audio_io(&IOStream::from_bytes(PIECES4)?, false)?,
+            pieces5: mix.load_audio_io(&IOStream::from_bytes(PIECES5)?, false)?,
+            pieces6: mix.load_audio_io(&IOStream::from_bytes(PIECES6)?, false)?,
+            pieces7: mix.load_audio_io(&IOStream::from_bytes(PIECES7)?, false)?,
+        })
     }
 }
