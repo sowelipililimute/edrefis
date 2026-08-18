@@ -4,7 +4,13 @@
 
 use nanoserde::{DeJson, SerJson};
 
-use crate::{hooks::{Cubes, Sounds}, input::{Input, Inputs}, piece::Piece, randomizer::Randomizer, well::Well};
+use crate::{
+    hooks::{Cubes, Sounds},
+    input::{Input, Inputs},
+    piece::Piece,
+    randomizer::Randomizer,
+    well::Well,
+};
 
 #[derive(Debug, Clone, SerJson, DeJson)]
 pub enum GameState {
@@ -33,7 +39,6 @@ pub struct Field {
 
     pub state: GameState,
 }
-
 
 pub fn level_to_gravity(level: u32) -> i32 {
     if level >= 500 {
@@ -180,8 +185,13 @@ impl Field {
                     if self.level % 100 != 99 {
                         self.level += 1;
                     }
-                    if self.next.collides_with(&self.well, 0, 0, self.next.rotation) {
-                        self.state = GameState::GameOver { ticks_remaining: 60 * 5  };
+                    if self
+                        .next
+                        .collides_with(&self.well, 0, 0, self.next.rotation)
+                    {
+                        self.state = GameState::GameOver {
+                            ticks_remaining: 60 * 5,
+                        };
                     } else {
                         self.next.do_gravity(
                             &self.well,
@@ -193,11 +203,12 @@ impl Field {
                         self.state = GameState::ActivePiece { piece: self.next };
                         self.next = self.randomizer.next_piece();
                         sounds.block_spawn(self.next.color);
-
                     }
                 }
             }
-            GameState::GameOver { ref mut ticks_remaining } => {
+            GameState::GameOver {
+                ref mut ticks_remaining,
+            } => {
                 *ticks_remaining -= 1;
 
                 if *ticks_remaining == 0 {

@@ -15,8 +15,19 @@ pub enum ClientToServer {
 
 #[derive(SerJson, DeJson, Clone)]
 pub enum ServerToClient {
-    Join { client_id: u32, field: Field },
-    Leave { client_id: u32 },
-    Input { client_id: u32, input: Input, up: bool },
-    Tick { client_id: u32 },
+    Join {
+        client_id: u32,
+        field: Field,
+    },
+    Leave {
+        client_id: u32,
+    },
+    Input {
+        client_id: u32,
+        input: Input,
+        up: bool,
+    },
+    Tick {
+        client_id: u32,
+    },
 }

@@ -51,7 +51,13 @@ impl BlockDirections {
     pub fn right(&self) -> bool {
         self.0 & Self::R != 0
     }
-    pub fn match_with(&self, up: Option<BlockDirections>, down: Option<BlockDirections>, left: Option<BlockDirections>, right: Option<BlockDirections>) -> BlockDirections {
+    pub fn match_with(
+        &self,
+        up: Option<BlockDirections>,
+        down: Option<BlockDirections>,
+        left: Option<BlockDirections>,
+        right: Option<BlockDirections>,
+    ) -> BlockDirections {
         BlockDirections::new(
             self.up() && up.map(|it| it.down()).unwrap_or(false),
             self.down() && down.map(|it| it.up()).unwrap_or(false),
@@ -81,7 +87,7 @@ pub struct Well {
 impl Well {
     pub fn new() -> Well {
         Well {
-            blocks: [[None; WELL_COLS]; WELL_ROWS]
+            blocks: [[None; WELL_COLS]; WELL_ROWS],
         }
     }
     pub fn do_clear(&mut self) -> Vec<(i32, [Option<Tile>; WELL_COLS])> {
@@ -96,7 +102,7 @@ impl Well {
     }
     pub fn commit_clear(&mut self, vec: &Vec<i32>) {
         for idx in vec {
-            self.blocks[0..*idx as usize+1].rotate_right(1);
+            self.blocks[0..*idx as usize + 1].rotate_right(1);
         }
     }
 }

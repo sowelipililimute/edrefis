@@ -49,25 +49,45 @@ impl Inputs {
 
     fn key_down(&self, code: Input, provider: &mut dyn InputProvider) -> bool {
         match code {
-        Input::Left | Input::Right | Input::Up | Input::Down => {
-            let left = self.inputs_tickstamps.get(&Input::Left).unwrap_or(&0);
-            let right = self.inputs_tickstamps.get(&Input::Right).unwrap_or(&0);
-            let up = self.inputs_tickstamps.get(&Input::Up).unwrap_or(&0);
-            let down = self.inputs_tickstamps.get(&Input::Down).unwrap_or(&0);
+            Input::Left | Input::Right | Input::Up | Input::Down => {
+                let left = self.inputs_tickstamps.get(&Input::Left).unwrap_or(&0);
+                let right = self.inputs_tickstamps.get(&Input::Right).unwrap_or(&0);
+                let up = self.inputs_tickstamps.get(&Input::Up).unwrap_or(&0);
+                let down = self.inputs_tickstamps.get(&Input::Down).unwrap_or(&0);
 
-            if code == Input::Left && left >= right && left >= up && left >= down && provider.key_down(code) {
-                true
-            } else if code == Input::Right && right >= left && right >= up && right >= down && provider.key_down(code) {
-                true
-            } else if code == Input::Up && up >= down && up >= left && up >= right && provider.key_down(code) {
-                true
-            } else if code == Input::Down && down >= up && down >= left && down >= right && provider.key_down(code) {
-                true
-            } else {
-                false
+                if code == Input::Left
+                    && left >= right
+                    && left >= up
+                    && left >= down
+                    && provider.key_down(code)
+                {
+                    true
+                } else if code == Input::Right
+                    && right >= left
+                    && right >= up
+                    && right >= down
+                    && provider.key_down(code)
+                {
+                    true
+                } else if code == Input::Up
+                    && up >= down
+                    && up >= left
+                    && up >= right
+                    && provider.key_down(code)
+                {
+                    true
+                } else if code == Input::Down
+                    && down >= up
+                    && down >= left
+                    && down >= right
+                    && provider.key_down(code)
+                {
+                    true
+                } else {
+                    false
+                }
             }
-        }
-        _ => provider.key_down(code)
+            _ => provider.key_down(code),
         }
     }
     pub fn tick(&mut self, tick: u64, provider: &mut dyn InputProvider) {
@@ -79,13 +99,15 @@ impl Inputs {
         }
         for input in INPUTS {
             if self.key_down(*input, provider) {
-                self.inputs.entry(*input)
-                    .and_modify(|x| *x = *x + 1 )
+                self.inputs
+                    .entry(*input)
+                    .and_modify(|x| *x = *x + 1)
                     .or_insert(1);
                 self.inputs_up.insert(*input, 0);
             } else {
-                self.inputs_up.entry(*input)
-                    .and_modify(|x| *x = *x + 1 )
+                self.inputs_up
+                    .entry(*input)
+                    .and_modify(|x| *x = *x + 1)
                     .or_insert(1);
                 self.inputs.insert(*input, 0);
             }
