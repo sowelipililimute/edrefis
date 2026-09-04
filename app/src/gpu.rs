@@ -280,6 +280,13 @@ impl State<'_> {
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
 
+        let texture_format = surface_format.add_srgb_suffix();
+        let view_formats = if texture_format != surface_format {
+            vec![texture_format]
+        } else {
+            Vec::default()
+        };
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -287,7 +294,7 @@ impl State<'_> {
             height,
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            view_formats: Vec::default(),
+            view_formats,
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
@@ -377,7 +384,7 @@ impl State<'_> {
                 module: &shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
+                    format: texture_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -402,7 +409,6 @@ impl State<'_> {
             cache: None,
         });
 
-        let texture_format = config.format;
         let white_texture = Rc::new(State::white_texture(
             &device,
             &queue,
@@ -670,11 +676,10 @@ impl State<'_> {
             .surface
             .get_current_texture()
             .map_err(|e| format!("failed to get current texture of surface: {}", e))?;
-        let view = Rc::new(
-            frame
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default()),
-        );
+        let view = Rc::new(frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.texture_format),
+            ..Default::default()
+        }));
 
         self.frame = Some(frame);
         self.frame_texture = Some(view.clone());
