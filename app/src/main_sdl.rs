@@ -92,11 +92,16 @@ pub fn main() -> Result<(), String> {
 
     let (width, height) = window.size();
 
-    let mut gpu_state = pollster::block_on(gpu::State::new(width, height, |instance| unsafe {
-        instance
-            .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).unwrap())
-            .map_err(|e| e.to_string())
-    }))?;
+    let mut gpu_state = pollster::block_on(gpu::State::new(
+        width,
+        height,
+        |instance| unsafe {
+            instance
+                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).unwrap())
+                .map_err(|e| e.to_string())
+        },
+        Box::new(|error| eprintln!("Unhandled GPU error {error}")),
+    ))?;
     let mut graphics = Graphics::new(&mut gpu_state)?;
 
     let mut world = World::new();

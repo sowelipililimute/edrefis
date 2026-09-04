@@ -402,22 +402,13 @@ impl State<'_> {
             cache: None,
         });
 
-        let frame = surface
-            .get_current_texture()
-            .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to get surface texture: {}", e))?;
-        let texture_format = frame.texture.format();
+        let texture_format = config.format;
         let white_texture = Rc::new(State::white_texture(
             &device,
             &queue,
             &texture_bind_group_layout,
             texture_format,
         ));
-        let output = Rc::new(
-            frame
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default()),
-        );
 
         // Set up text renderer
         let font_system = glyphon::FontSystem::new_with_fonts([
@@ -445,8 +436,8 @@ impl State<'_> {
             matrix_bind_group_layout,
             white_texture: white_texture.clone(),
 
-            frame: Some(frame),
-            frame_texture: Some(output),
+            frame: None,
+            frame_texture: None,
             texture_format,
 
             active_render_pass: None,
@@ -663,33 +654,32 @@ impl State<'_> {
         self.config.width = width as u32;
         self.config.height = height as u32;
 
-        let frame = std::mem::replace(&mut self.frame, None).unwrap();
-        let output = std::mem::replace(&mut self.frame_texture, None).unwrap();
-
-        drop(frame);
-        drop(output);
+        self.frame_texture = None;
+        self.frame = None;
 
         self.surface.configure(&self.device, &self.config);
 
-        let next_frame = self
+        Ok(())
+    }
+    fn get_frame_view(&mut self) -> Result<Rc<wgpu::TextureView>, String> {
+        if let Some(view) = &self.frame_texture {
+            return Ok(view.clone());
+        }
+
+        let frame = self
             .surface
             .get_current_texture()
-            .map_err(|e| e.to_string())
-            .map_err(|e| {
-                format!(
-                    "failed to get current texture of surface after a resize: {}",
-                    e
-                )
-            })?;
+            .map_err(|e| format!("failed to get current texture of surface: {}", e))?;
+        let view = Rc::new(
+            frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default()),
+        );
 
-        let next_output = next_frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.frame = Some(frame);
+        self.frame_texture = Some(view.clone());
 
-        self.frame = Some(next_frame);
-        self.frame_texture = Some(Rc::new(next_output));
-
-        Ok(())
+        Ok(view)
     }
     pub fn queue_draw<const V: usize, const I: usize>(&mut self, data: ([AVertex; V], [u16; I])) {
         let (v, i) = data;
@@ -704,7 +694,12 @@ impl State<'_> {
         self.camera_matrix = camera.matrix(&self.config);
         self.camera_texture = camera.texture();
     }
-    pub fn start_render_pass(&mut self, clear: Option<wgpu::Color>) {
+    pub fn start_render_pass(&mut self, clear: Option<wgpu::Color>) -> Result<(), String> {
+        let target = match &self.camera_texture {
+            Some(texture) => texture.clone(),
+            None => self.get_frame_view()?,
+        };
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -714,10 +709,7 @@ impl State<'_> {
         let mut pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: match &self.camera_texture {
-                        Some(texture) => &texture,
-                        None => &self.frame_texture.as_ref().unwrap(),
-                    },
+                    view: &target,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: clear.map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
@@ -733,6 +725,8 @@ impl State<'_> {
         pass.set_pipeline(&self.render_pipeline);
 
         self.active_render_pass = Some((encoder, pass));
+
+        Ok(())
     }
     pub fn complete_render_pass(&mut self) -> Result<(), String> {
         let (encoder, render_pass) = std::mem::replace(&mut self.active_render_pass, None)
@@ -875,23 +869,13 @@ impl State<'_> {
         Ok(())
     }
     pub fn present(&mut self) -> Result<(), String> {
-        let frame = std::mem::replace(&mut self.frame, None).unwrap();
-        let _output = std::mem::replace(&mut self.frame_texture, None).unwrap();
+        self.frame_texture = None;
+        let frame = self
+            .frame
+            .take()
+            .ok_or("tried to present without a frame being acquired")?;
 
         frame.present();
-
-        let next_frame = self
-            .surface
-            .get_current_texture()
-            .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to get current texture for present: {}", e))?;
-
-        let next_output = next_frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        self.frame = Some(next_frame);
-        self.frame_texture = Some(Rc::new(next_output));
 
         Ok(())
     }

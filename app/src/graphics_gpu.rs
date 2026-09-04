@@ -292,7 +292,7 @@ impl Graphics {
             g: 0.,
             b: 0.,
             a: 0.,
-        }));
+        }))?;
 
         state.set_texture(Some(self.tilemap.clone()));
 
@@ -542,7 +542,7 @@ impl Graphics {
             Some(self.next.1.clone()),
         ));
 
-        state.start_render_pass(Some(wgpu::Color::TRANSPARENT));
+        state.start_render_pass(Some(wgpu::Color::TRANSPARENT))?;
         state.set_texture(Some(self.tilemap.clone()));
         self.queue_piece(next, false, state);
         state.do_draw()?;
@@ -607,7 +607,7 @@ impl Graphics {
             g: 0.05,
             b: 0.1,
             a: 1.0,
-        }));
+        }))?;
         self.render_background(level, state)?;
 
         state.set_camera(&Camera3D::default());
