@@ -4,11 +4,18 @@
 
 use std::collections::HashSet;
 
-use logic::{field::{Field, GameState}, hooks::{Cubes, Sounds}, input::{Input, InputProvider, Inputs}};
-use wasm_bindgen::prelude::wasm_bindgen;
-use web_sys::HtmlCanvasElement;
-use wgpu::SurfaceTarget;
 use crate::{gpu::State, graphics_gpu::Graphics};
+use hecs::World;
+use logic::{
+    field::{field_system, spawn_field, GameState},
+    hooks::{Cubes, Sounds},
+    input::{Input, InputProvider, Inputs},
+    piece::Piece,
+    well::Well,
+};
+use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use web_sys::{console, HtmlCanvasElement};
+use wgpu::SurfaceTarget;
 
 struct DummyImpl;
 impl Cubes for DummyImpl {
@@ -25,7 +32,7 @@ impl Sounds for DummyImpl {
 pub struct App {
     gpu: State<'static>,
     graphics: Graphics,
-    field: Field,
+    world: World,
     inputs: Inputs,
     input_provider: WebInputs,
     ticks: u64,
@@ -39,6 +46,7 @@ fn input_to_web_code(key: Input) -> &'static str {
         Input::Right => "ArrowRight",
         Input::CW => "KeyX",
         Input::CCW => "KeyZ",
+        Input::DebugLevel => "KeyC",
     }
 }
 
@@ -82,15 +90,33 @@ impl InputProvider for WebInputs {
 
 impl App {
     pub async fn new(canvas: HtmlCanvasElement) -> Result<App, String> {
-        let mut gpu = State::new(canvas.width(), canvas.height(), |instance| {
-            instance.create_surface(SurfaceTarget::Canvas(canvas)).map_err(|e| format!("failed to create instance for canvas: {}", e))
-        }).await.map_err(|e| format!("failed to set up gpu: {}", e))?;
-        let graphics = Graphics::new(&mut gpu).map_err(|e| format!("failed to load graphics: {}", e))?;
+        let mut gpu = State::new(
+            canvas.width(),
+            canvas.height(),
+            |instance| {
+                instance
+                    .create_surface(SurfaceTarget::Canvas(canvas))
+                    .map_err(|e| format!("failed to create instance for canvas: {}", e))
+            },
+            Box::new(|error| {
+                let desc = error.to_string();
+                let log = format!("Unhandled GPU error {desc}");
+                console::error_1(&log.into());
+            }),
+        )
+        .await
+        .map_err(|e| format!("failed to set up gpu: {}", e))?;
+        let graphics =
+            Graphics::new(&mut gpu).map_err(|e| format!("failed to load graphics: {}", e))?;
+
+        let mut world = World::new();
+        spawn_field(&mut world);
 
         Ok(App {
             gpu,
             graphics,
-            field: Field::new(),
+            world,
+            // field: Field::new(),
             inputs: Inputs::new(),
             input_provider: WebInputs::new(),
             ticks: 0u64,
@@ -101,24 +127,33 @@ impl App {
 #[wasm_bindgen]
 impl App {
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
-        self.gpu.resize(width, height).map_err(|e| format!("failed to resize canvas: {}", e))
+        self.gpu
+            .resize(width, height)
+            .map_err(|e| format!("failed to resize canvas: {}", e))
     }
     pub fn tick(&mut self) {
         let mut sounds = DummyImpl;
         let mut cubes = DummyImpl;
         self.ticks += 1;
         self.inputs.tick(self.ticks, &mut self.input_provider);
-        self.field.update(&mut self.inputs, &mut sounds, &mut cubes);
+        field_system(&mut self.world, &self.inputs, &mut sounds, &mut cubes);
     }
     pub fn draw(&mut self) -> Result<(), String> {
-        match self.field.state {
-            GameState::ActivePiece { piece, .. } => {
-                self.graphics.render(&self.field, &self.field.well, Some(&piece), &self.field.next, &mut self.gpu)?;
-            }
-            _ => {
-                self.graphics.render(&self.field, &self.field.well, None, &self.field.next, &mut self.gpu)?;
+        for (well, level, state, next) in
+            self.world.query_mut::<(&Well, &u32, &GameState, &Piece)>()
+        {
+            match state {
+                GameState::ActivePiece { ref piece, .. } => {
+                    self.graphics
+                        .render(*level, well, Some(piece), next, &mut self.gpu)?;
+                }
+                _ => {
+                    self.graphics
+                        .render(*level, well, None, next, &mut self.gpu)?;
+                }
             }
         }
+
         Ok(())
     }
     pub fn key_down(&mut self, event: web_sys::KeyboardEvent) {

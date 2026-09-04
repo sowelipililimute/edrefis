@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // use cgmath::{perspective, Deg, Matrix4, Point3, Rad, SquareMatrix, Vector2, Vector3, Vector4, Zero};
-use std::{borrow::Cow, rc::Rc, sync::Arc};
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles};
 use glyphon::fontdb;
-use wgpu::util::DeviceExt;
+use std::{borrow::Cow, rc::Rc, sync::Arc};
+use wgpu::{util::DeviceExt, UncapturedErrorHandler};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -20,7 +20,12 @@ impl AVertex {
     fn new(position: Vec3, color: wgpu::Color, uv: Vec2) -> AVertex {
         AVertex {
             position: position.into(),
-            color: [color.r as f32, color.g as f32, color.b as f32, color.a as f32],
+            color: [
+                color.r as f32,
+                color.g as f32,
+                color.b as f32,
+                color.a as f32,
+            ],
             uv: [uv.x, uv.y],
         }
     }
@@ -76,10 +81,14 @@ pub fn parallelogram(
         [
             AVertex::new(position, color, uv_position),
             AVertex::new(position + edge1, color, uv_position + uv_edge1),
-            AVertex::new(position + edge1 + edge2, color, uv_position + uv_edge1 + uv_edge2),
+            AVertex::new(
+                position + edge1 + edge2,
+                color,
+                uv_position + uv_edge1 + uv_edge2,
+            ),
             AVertex::new(position + edge2, color, uv_position + uv_edge2),
         ],
-        [0, 1, 2, 0, 2, 3]
+        [0, 1, 2, 0, 2, 3],
     )
 }
 
@@ -127,7 +136,11 @@ pub struct Camera3D {
 }
 
 impl Camera2D {
-    pub fn from_rect(position: Vec2, size: Vec2, texture: Option<Rc<wgpu::TextureView>>) -> Camera2D {
+    pub fn from_rect(
+        position: Vec2,
+        size: Vec2,
+        texture: Option<Rc<wgpu::TextureView>>,
+    ) -> Camera2D {
         let target = position + (size / 2.);
 
         Camera2D {
@@ -221,7 +234,12 @@ pub struct State<'a> {
 }
 
 impl State<'_> {
-    pub async fn new<'a, F: FnOnce (&wgpu::Instance) -> Result<wgpu::Surface<'a>, String>>(width: u32, height: u32, maker: F) -> Result<State<'a>, String> {
+    pub async fn new<'a, F: FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'a>, String>>(
+        width: u32,
+        height: u32,
+        maker: F,
+        error_handler: Box<dyn UncapturedErrorHandler>,
+    ) -> Result<State<'a>, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY | wgpu::Backends::SECONDARY,
             dx12_shader_compiler: Default::default(),
@@ -252,6 +270,7 @@ impl State<'_> {
             .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to obtain adapter: {}", e))?;
 
+        device.on_uncaptured_error(error_handler);
         let surface_caps = surface.get_capabilities(&adapter);
 
         let surface_format = surface_caps
@@ -383,11 +402,22 @@ impl State<'_> {
             cache: None,
         });
 
-        let frame = surface.get_current_texture().map_err(|e| e.to_string())
+        let frame = surface
+            .get_current_texture()
+            .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to get surface texture: {}", e))?;
         let texture_format = frame.texture.format();
-        let white_texture = Rc::new(State::white_texture(&device, &queue, &texture_bind_group_layout, texture_format));
-        let output = Rc::new(frame.texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        let white_texture = Rc::new(State::white_texture(
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+            texture_format,
+        ));
+        let output = Rc::new(
+            frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default()),
+        );
 
         // Set up text renderer
         let font_system = glyphon::FontSystem::new_with_fonts([
@@ -398,8 +428,12 @@ impl State<'_> {
         let cache = glyphon::Cache::new(&device);
         let viewport = glyphon::Viewport::new(&device, &cache);
         let mut atlas = glyphon::TextAtlas::new(&device, &queue, &cache, texture_format);
-        let text_renderer =
-            glyphon::TextRenderer::new(&mut atlas, &device, wgpu::MultisampleState::default(), None);
+        let text_renderer = glyphon::TextRenderer::new(
+            &mut atlas,
+            &device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
 
         Ok(State {
             surface,
@@ -430,14 +464,19 @@ impl State<'_> {
             indices: vec![],
         })
     }
-    fn white_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture_bind_group_layout: &wgpu::BindGroupLayout, format: wgpu::TextureFormat) -> wgpu::BindGroup {
+    fn white_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::BindGroup {
         let size = wgpu::Extent3d {
             width: 1,
             height: 1,
             depth_or_array_layers: 1,
         };
 
-       let texture = device.create_texture(&wgpu::TextureDescriptor {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
             size,
             mip_level_count: 1,
             sample_count: 1,
@@ -492,20 +531,26 @@ impl State<'_> {
 
         texture_bind_group
     }
-    pub fn create_texture(&self, width: u32, height: u32) -> (Rc<wgpu::BindGroup>, Rc<wgpu::TextureView>) {
+    pub fn create_texture(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> (Rc<wgpu::BindGroup>, Rc<wgpu::TextureView>) {
         let size = wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         };
 
-       let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: self.texture_format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
             label: Some("blocks"),
             view_formats: &[],
         });
@@ -538,11 +583,21 @@ impl State<'_> {
 
         (Rc::new(texture_bind_group), Rc::new(texture_view))
     }
-    pub fn upload_texture(&self, png_bytes: &[u8], filter: wgpu::FilterMode) -> Result<Rc<wgpu::BindGroup>, String> {
-        let header = minipng::decode_png_header(png_bytes).map_err(|e| e.to_string()).map_err(|e| format!("failed to decode PNG header: {}", e))?;
+    pub fn upload_texture(
+        &self,
+        png_bytes: &[u8],
+        filter: wgpu::FilterMode,
+    ) -> Result<Rc<wgpu::BindGroup>, String> {
+        let header = minipng::decode_png_header(png_bytes)
+            .map_err(|e| e.to_string())
+            .map_err(|e| format!("failed to decode PNG header: {}", e))?;
         let mut buffer = vec![0; header.required_bytes_rgba8bpc()];
-        let mut png = minipng::decode_png(png_bytes, &mut buffer).map_err(|e| e.to_string()).map_err(|e| format!("failed to decode PNG: {}", e))?;
-        png.convert_to_rgba8bpc().map_err(|e| e.to_string()).map_err(|e| format!("failed to convert PNG to rgba8bpc: {}", e))?;
+        let mut png = minipng::decode_png(png_bytes, &mut buffer)
+            .map_err(|e| e.to_string())
+            .map_err(|e| format!("failed to decode PNG: {}", e))?;
+        png.convert_to_rgba8bpc()
+            .map_err(|e| e.to_string())
+            .map_err(|e| format!("failed to convert PNG to rgba8bpc: {}", e))?;
 
         let size = wgpu::Extent3d {
             width: png.width(),
@@ -550,7 +605,7 @@ impl State<'_> {
             depth_or_array_layers: 1,
         };
 
-       let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             size,
             mip_level_count: 1,
             sample_count: 1,
@@ -620,7 +675,12 @@ impl State<'_> {
             .surface
             .get_current_texture()
             .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to get current texture of surface after a resize: {}", e))?;
+            .map_err(|e| {
+                format!(
+                    "failed to get current texture of surface after a resize: {}",
+                    e
+                )
+            })?;
 
         let next_output = next_frame
             .texture
@@ -648,32 +708,35 @@ impl State<'_> {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("command_encoder"),
+                label: Some("main_command_encoder"),
             });
 
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: match &self.camera_texture {
-                    Some(texture) => &texture,
-                    None => &self.frame_texture.as_ref().unwrap(),
-                },
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: clear.map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            label: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        }).forget_lifetime();
+        let mut pass = encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: match &self.camera_texture {
+                        Some(texture) => &texture,
+                        None => &self.frame_texture.as_ref().unwrap(),
+                    },
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: clear.map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                label: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            })
+            .forget_lifetime();
         pass.set_pipeline(&self.render_pipeline);
 
         self.active_render_pass = Some((encoder, pass));
     }
     pub fn complete_render_pass(&mut self) -> Result<(), String> {
-        let (encoder, render_pass) = std::mem::replace(&mut self.active_render_pass, None).ok_or("tried to complete a render pass without one being active")?;
+        let (encoder, render_pass) = std::mem::replace(&mut self.active_render_pass, None)
+            .ok_or("tried to complete a render pass without one being active")?;
 
         drop(render_pass);
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -683,7 +746,10 @@ impl State<'_> {
         if self.vertices.is_empty() {
             return Ok(());
         }
-        let (_, ref mut render_pass) = self.active_render_pass.as_mut().ok_or("tried to draw without a render pass being active")?;
+        let (_, ref mut render_pass) = self
+            .active_render_pass
+            .as_mut()
+            .ok_or("tried to draw without a render pass being active")?;
 
         let matrix = MatrixUniform::from(&self.camera_matrix);
 
@@ -704,16 +770,20 @@ impl State<'_> {
             label: Some("matrix_bind_group"),
         });
 
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Well Vertex Buffer"),
-            contents: bytemuck::cast_slice(&self.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Well Index Buffer"),
-            contents: bytemuck::cast_slice(&self.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Well Vertex Buffer"),
+                contents: bytemuck::cast_slice(&self.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Well Index Buffer"),
+                contents: bytemuck::cast_slice(&self.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
         let num_indices = self.indices.len() as u32;
 
         render_pass.set_bind_group(0, self.active_bind_group.as_ref(), &[]);
@@ -728,7 +798,8 @@ impl State<'_> {
         Ok(())
     }
     pub fn create_buffer(&mut self) -> glyphon::Buffer {
-        let mut text_buffer = glyphon::Buffer::new(&mut self.font_system, glyphon::Metrics::new(30.0, 42.0));
+        let mut text_buffer =
+            glyphon::Buffer::new(&mut self.font_system, glyphon::Metrics::new(30.0, 42.0));
 
         text_buffer.set_size(&mut self.font_system, None, None);
 
@@ -740,22 +811,31 @@ impl State<'_> {
         spans: I,
         default_attrs: glyphon::Attrs,
     ) where
-        I: IntoIterator<Item = (&'s str, glyphon::Attrs<'r>)>
+        I: IntoIterator<Item = (&'s str, glyphon::Attrs<'r>)>,
     {
-        buffer.set_rich_text(&mut self.font_system, spans, default_attrs, glyphon::Shaping::Advanced);
+        buffer.set_rich_text(
+            &mut self.font_system,
+            spans,
+            default_attrs,
+            glyphon::Shaping::Advanced,
+        );
         buffer.shape_until_scroll(&mut self.font_system, false);
     }
     pub fn world_to_view(&self, point: Vec3) -> Vec2 {
-        let transformed = (self.camera_matrix.project_point3(point).xy() / Vec2::new(2., -2.)) + Vec2::new(0.5, 0.5);
+        let transformed = (self.camera_matrix.project_point3(point).xy() / Vec2::new(2., -2.))
+            + Vec2::new(0.5, 0.5);
         let screen_size = Vec2::new(self.config.width as f32, self.config.height as f32);
 
         transformed * screen_size
     }
     pub fn draw_text(&mut self, buffer: &mut glyphon::Buffer, point: Vec2) -> Result<(), String> {
-        self.viewport.update(&self.queue, glyphon::Resolution {
-            width: self.config.width,
-            height: self.config.height,
-        });
+        self.viewport.update(
+            &self.queue,
+            glyphon::Resolution {
+                width: self.config.width,
+                height: self.config.height,
+            },
+        );
         self.text_renderer
             .prepare(
                 &mut self.device,
@@ -778,12 +858,19 @@ impl State<'_> {
                     custom_glyphs: &[],
                 }],
                 &mut self.swash_cache,
-            ).map_err(|e| e.to_string())
+            )
+            .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to prepare a text render: {}", e))?;
 
-        let (_, ref mut render_pass) = self.active_render_pass.as_mut().ok_or("tried to draw without a render pass being active")?;
+        let (_, ref mut render_pass) = self
+            .active_render_pass
+            .as_mut()
+            .ok_or("tried to draw without a render pass being active")?;
 
-        self.text_renderer.render(&self.atlas, &self.viewport, render_pass).map_err(|e| e.to_string()).map_err(|e| format!("failed to complete a text render: {}", e))?;
+        self.text_renderer
+            .render(&self.atlas, &self.viewport, render_pass)
+            .map_err(|e| e.to_string())
+            .map_err(|e| format!("failed to complete a text render: {}", e))?;
 
         Ok(())
     }

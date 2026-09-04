@@ -79,7 +79,7 @@ pub struct Tile {
 pub const WELL_COLS: usize = 10;
 pub const WELL_ROWS: usize = 21;
 
-#[derive(SerJson, DeJson, Clone)]
+#[derive(SerJson, DeJson, Clone, Debug)]
 pub struct Well {
     pub blocks: [[Option<Tile>; WELL_COLS]; WELL_ROWS],
 }
