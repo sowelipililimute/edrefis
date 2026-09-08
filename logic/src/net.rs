@@ -6,21 +6,21 @@ use nanoserde::{DeJson, SerJson};
 use crate::{field::GameState, piece::Piece, randomizer::Randomizer, well::Well};
 
 #[derive(Debug)]
-struct Replicated;
+pub struct Replicated;
 
 #[derive(Debug)]
-struct Remote;
+pub struct Remote;
 
 #[derive(SerJson, DeJson)]
-struct States {
-    well_states: HashMap<u32, String>,
-    randomizer_states: HashMap<u32, String>,
-    level_states: HashMap<u32, String>,
-    game_states: HashMap<u32, String>,
-    active_piece_states: HashMap<u32, String>,
+pub struct States {
+    pub well_states: HashMap<u32, String>,
+    pub randomizer_states: HashMap<u32, String>,
+    pub level_states: HashMap<u32, String>,
+    pub game_states: HashMap<u32, String>,
+    pub active_piece_states: HashMap<u32, String>,
 }
 
-fn gather_states(world: &mut World) -> States {
+pub fn gather_states(world: &mut World) -> States {
     let mut well_states = HashMap::<u32, String>::new();
     let mut randomizer_states = HashMap::<u32, String>::new();
     let mut level_states = HashMap::<u32, String>::new();
@@ -56,7 +56,7 @@ fn gather_states(world: &mut World) -> States {
     }
 }
 
-fn apply_states(
+pub fn apply_states(
     states: &States,
     server_to_client_ids: &mut HashMap<u32, Entity>,
     world: &mut World,
@@ -97,33 +97,5 @@ fn apply_states(
             let cuid = world.spawn(builder.build());
             server_to_client_ids.insert(*suid, cuid);
         }
-    }
-}
-
-mod tests {
-    use super::*;
-    use crate::field::spawn_field;
-    use hecs::World;
-
-    #[test]
-    fn basics() {
-        let mut server_world = World::new();
-        let server_field = spawn_field(&mut server_world);
-        server_world
-            .insert(server_field, (Replicated,))
-            .expect("should be able to mark it as replicated");
-
-        let states = gather_states(&mut server_world);
-        assert_eq!(states.well_states.len(), 1);
-        assert_eq!(states.randomizer_states.len(), 1);
-        assert_eq!(states.level_states.len(), 1);
-        assert_eq!(states.game_states.len(), 1);
-        assert_eq!(states.active_piece_states.len(), 1);
-
-        let mut client_world = World::new();
-        let mut server_to_client_ids = HashMap::<u32, Entity>::new();
-        apply_states(&states, &mut server_to_client_ids, &mut client_world);
-
-        assert_eq!(server_to_client_ids.len(), 1);
     }
 }

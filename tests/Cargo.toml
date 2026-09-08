@@ -1,0 +1,13 @@
+[package]
+name = "tests"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "edrefis_tests"
+
+[dependencies]
+app = { path = "../app" }
+logic = { path = "../logic" }
+server = { path = "../server" }
+hecs = { workspace = true }

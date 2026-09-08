@@ -7,5 +7,10 @@ members = [
     "app",
     "logic",
     "nanotime",
+    "server", "tests",
 ]
 resolver = "2"
+
+[workspace.dependencies]
+hecs = "0.11.1"
+nanoserde = "0.1.37"
