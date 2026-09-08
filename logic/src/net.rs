@@ -11,7 +11,7 @@ pub struct Replicated;
 #[derive(Debug)]
 pub struct Remote;
 
-#[derive(SerJson, DeJson)]
+#[derive(SerJson, DeJson, Clone)]
 pub struct States {
     pub entity_states: HashMap<u32, HashMap<u32, String>>,
 }

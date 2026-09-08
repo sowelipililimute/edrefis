@@ -1,7 +1,7 @@
+use crate::client::Client;
 use crate::gpu;
 use crate::graphics_gpu::Graphics;
 use crate::sounds_sdl::ClientSounds;
-use hecs::World;
 use logic::{
     field::{field_system, spawn_field, GameState},
     hooks::Cubes,
@@ -104,8 +104,8 @@ pub fn main() -> Result<(), String> {
     ))?;
     let mut graphics = Graphics::new(&mut gpu_state)?;
 
-    let mut world = World::new();
-    spawn_field(&mut world);
+    let mut client = Client::new();
+    spawn_field(&mut client.world);
     let mut input_provider = SDLInputs::new();
     let mut inputs = Inputs::new();
 
@@ -167,9 +167,12 @@ pub fn main() -> Result<(), String> {
         ticks += 1;
         inputs.tick(ticks, &mut input_provider);
 
-        field_system(&mut world, &inputs, &mut sounds, &mut cubes);
+        field_system(&mut client.world, &inputs, &mut sounds, &mut cubes);
 
-        for (well, level, state, next) in world.query_mut::<(&Well, &u32, &GameState, &Piece)>() {
+        for (well, level, state, next) in client
+            .world
+            .query_mut::<(&Well, &u32, &GameState, &Piece)>()
+        {
             match state {
                 GameState::ActivePiece { ref piece, .. } => {
                     graphics.render(*level, well, Some(piece), next, &mut gpu_state)?;

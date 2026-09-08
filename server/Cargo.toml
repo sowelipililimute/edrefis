@@ -6,6 +6,6 @@ edition = "2024"
 [dependencies]
 logic = { path = "../logic" }
 hecs = "0.11.1"
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.30"
-futures-util = "0.3.34"
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }

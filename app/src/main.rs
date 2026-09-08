@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+mod client;
 mod gpu;
 mod graphics_gpu;
 

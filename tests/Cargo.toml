@@ -11,3 +11,8 @@ app = { path = "../app" }
 logic = { path = "../logic" }
 server = { path = "../server" }
 hecs = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+nanoserde = { workspace = true }
+tokio-stream = "0.1.19"

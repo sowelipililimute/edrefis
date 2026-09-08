@@ -1,3 +1,5 @@
+mod server;
+
 use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
