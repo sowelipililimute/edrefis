@@ -10,7 +10,6 @@ use nanoserde::{DeJson, SerJson};
 use server::server::Server;
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::mpsc;
 use tokio::time::interval;
 use tokio::{io::duplex, sync::Mutex};
 use tokio_stream::wrappers::IntervalStream;
@@ -93,7 +92,7 @@ fn make_pair() -> Pair {
                     if let Some(msg) = msg {
                         if let Message::Text(text) = msg.unwrap() {
                             let packet: ClientToServer = DeJson::deserialize_json(text.as_str()).unwrap();
-                            server.lock().await.queue_packet(0u32, packet);
+                            server.lock().await.queue_packet((0u32, packet));
                         }
                     } else {
                         break
@@ -130,13 +129,25 @@ fn state_sync_basics() {
 #[tokio::test]
 async fn client_server_basics() {
     let pair = make_pair();
+
+    pair.run_server(|server| {
+        assert_eq!(server.world.iter().count(), 0);
+    })
+    .await;
+
     pair.run_client(|client| {
+        assert_eq!(client.world.iter().count(), 0);
         client.queue_send(ClientToServer::Join);
     })
     .await;
 
     pair.run_server(|server| {
         assert_eq!(server.world.iter().count(), 1);
+    })
+    .await;
+
+    pair.run_client(|client| {
+        assert_eq!(client.world.iter().count(), 1);
     })
     .await;
 }

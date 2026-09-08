@@ -6,6 +6,7 @@ pub mod field;
 pub mod hooks;
 pub mod input;
 pub mod net;
+pub mod peer;
 pub mod piece;
 pub mod proto;
 pub mod randomizer;
