@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{any::TypeId, collections::HashMap};
 
 use hecs::{Entity, EntityBuilder, World};
 use nanoserde::{DeJson, SerJson};
@@ -13,89 +13,138 @@ pub struct Remote;
 
 #[derive(SerJson, DeJson)]
 pub struct States {
-    pub well_states: HashMap<u32, String>,
-    pub randomizer_states: HashMap<u32, String>,
-    pub level_states: HashMap<u32, String>,
-    pub game_states: HashMap<u32, String>,
-    pub active_piece_states: HashMap<u32, String>,
+    pub entity_states: HashMap<u32, HashMap<u32, String>>,
 }
 
-pub fn gather_states(world: &mut World) -> States {
-    let mut well_states = HashMap::<u32, String>::new();
-    let mut randomizer_states = HashMap::<u32, String>::new();
-    let mut level_states = HashMap::<u32, String>::new();
-    let mut game_states = HashMap::<u32, String>::new();
-    let mut active_piece_states = HashMap::<u32, String>::new();
+fn hash(string: &str) -> u32 {
+    let mut hash: u32 = 0;
 
-    for (uid, _, well) in world.query_mut::<(Entity, &Replicated, &Well)>() {
-        well_states.insert(uid.id(), well.serialize_json());
+    for byte in string.as_bytes() {
+        hash = (*byte as u32)
+            .wrapping_add(hash << 6)
+            .wrapping_add(hash << 16)
+            .wrapping_sub(hash);
     }
 
-    for (uid, _, randomizer) in world.query_mut::<(Entity, &Replicated, &Randomizer)>() {
-        randomizer_states.insert(uid.id(), randomizer.serialize_json());
-    }
-
-    for (uid, _, level) in world.query_mut::<(Entity, &Replicated, &u32)>() {
-        level_states.insert(uid.id(), level.serialize_json());
-    }
-
-    for (uid, _, game) in world.query_mut::<(Entity, &Replicated, &GameState)>() {
-        game_states.insert(uid.id(), game.serialize_json());
-    }
-
-    for (uid, _, active_piece) in world.query_mut::<(Entity, &Replicated, &Piece)>() {
-        active_piece_states.insert(uid.id(), active_piece.serialize_json());
-    }
-
-    States {
-        well_states,
-        randomizer_states,
-        level_states,
-        game_states,
-        active_piece_states,
-    }
+    hash
 }
 
-pub fn apply_states(
-    states: &States,
-    server_to_client_ids: &mut HashMap<u32, Entity>,
-    world: &mut World,
-) {
-    let mut builders = HashMap::<u32, EntityBuilder>::new();
+type SerializeCallback = fn(u32, &mut World, &mut States) -> ();
 
-    for (suid, well) in &states.well_states {
-        let well: Well = DeJson::deserialize_json(well).unwrap();
-        let builder = builders.entry(*suid).or_insert(EntityBuilder::new());
-        builder.add(well);
+fn make_serialize_callback<TComp: SerJson + Send + Sync + 'static>() -> SerializeCallback {
+    fn serialize_callback<TComp: SerJson + Send + Sync + 'static>(
+        component_id: u32,
+        world: &mut World,
+        states: &mut States,
+    ) {
+        for (uid, _, component) in world.query_mut::<(Entity, &Replicated, &TComp)>() {
+            let entity_components = states
+                .entity_states
+                .entry(uid.id())
+                .or_insert(HashMap::new());
+
+            entity_components.insert(component_id, component.serialize_json());
+        }
     }
-    for (suid, randomizer) in &states.randomizer_states {
-        let randomizer: Randomizer = DeJson::deserialize_json(randomizer).unwrap();
-        let builder = builders.entry(*suid).or_insert(EntityBuilder::new());
-        builder.add(randomizer);
-    }
-    for (suid, level) in &states.level_states {
-        let level: u32 = DeJson::deserialize_json(level).unwrap();
-        let builder = builders.entry(*suid).or_insert(EntityBuilder::new());
-        builder.add(level);
-    }
-    for (suid, game) in &states.game_states {
-        let game: GameState = DeJson::deserialize_json(game).unwrap();
-        let builder = builders.entry(*suid).or_insert(EntityBuilder::new());
-        builder.add(game);
-    }
-    for (suid, active_piece) in &states.active_piece_states {
-        let active_piece: Piece = DeJson::deserialize_json(active_piece).unwrap();
-        let builder = builders.entry(*suid).or_insert(EntityBuilder::new());
-        builder.add(active_piece);
+    serialize_callback::<TComp>
+}
+
+type DeserializeCallback = fn(u32, &mut HashMap<u32, EntityBuilder>, &States) -> ();
+
+fn make_deserialize_callback<TComp: DeJson + Send + Sync + 'static>() -> DeserializeCallback {
+    fn deserialize_callback<TComp: DeJson + Send + Sync + 'static>(
+        component_id: u32,
+        builders: &mut HashMap<u32, EntityBuilder>,
+        states: &States,
+    ) {
+        for (entity, components) in &states.entity_states {
+            if let Some(component_str) = components.get(&component_id) {
+                let comp: TComp = DeJson::deserialize_json(component_str).unwrap();
+                let builder = builders.entry(*entity).or_insert(EntityBuilder::new());
+                builder.add(comp);
+            }
+        }
     }
 
-    for (suid, builder) in &mut builders {
-        if let Some(cuid) = server_to_client_ids.get(suid) {
-            world.insert(*cuid, builder.build()).unwrap();
-        } else {
-            builder.add(Remote);
-            let cuid = world.spawn(builder.build());
-            server_to_client_ids.insert(*suid, cuid);
+    deserialize_callback::<TComp>
+}
+
+#[derive(Debug)]
+struct NetComponentRegistration {
+    component_id: u32,
+    serialize_components: SerializeCallback,
+    deserialize_components: DeserializeCallback,
+}
+
+#[derive(Debug)]
+pub struct NetComponentRegistry {
+    components: HashMap<TypeId, NetComponentRegistration>,
+}
+
+impl NetComponentRegistry {
+    fn new() -> NetComponentRegistry {
+        NetComponentRegistry {
+            components: HashMap::new(),
+        }
+    }
+
+    fn register<TComp: SerJson + DeJson + Send + Sync + 'static>(&mut self, name: &str) {
+        self.components.insert(
+            TypeId::of::<TComp>(),
+            NetComponentRegistration {
+                component_id: hash(name),
+                serialize_components: make_serialize_callback::<TComp>(),
+                deserialize_components: make_deserialize_callback::<TComp>(),
+            },
+        );
+    }
+
+    pub fn new_with_all_components() -> NetComponentRegistry {
+        let mut registry = NetComponentRegistry::new();
+        registry.register::<Well>("Well");
+        registry.register::<Randomizer>("Randomizer");
+        registry.register::<u32>("Level");
+        registry.register::<GameState>("GameState");
+        registry.register::<Piece>("ActivePiece");
+        registry
+    }
+
+    pub fn serialize_world(&self, world: &mut World) -> States {
+        let mut states = States {
+            entity_states: HashMap::new(),
+        };
+
+        for registration in self.components.values() {
+            (registration.serialize_components)(registration.component_id, world, &mut states);
+        }
+
+        states
+    }
+
+    pub fn apply_states(
+        &self,
+        world: &mut World,
+        server_to_client_ids: &mut HashMap<u32, Entity>,
+        states: &States,
+    ) {
+        let mut builders = HashMap::<u32, EntityBuilder>::new();
+
+        for registration in self.components.values() {
+            ((registration.deserialize_components)(
+                registration.component_id,
+                &mut builders,
+                states,
+            ));
+        }
+
+        for (suid, builder) in &mut builders {
+            if let Some(cuid) = server_to_client_ids.get(suid) {
+                world.insert(*cuid, builder.build()).unwrap();
+            } else {
+                builder.add(Remote);
+                let cuid = world.spawn(builder.build());
+                server_to_client_ids.insert(*suid, cuid);
+            }
         }
     }
 }
