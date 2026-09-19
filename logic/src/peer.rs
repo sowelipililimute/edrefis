@@ -1,4 +1,7 @@
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    time::{Duration, Instant},
+};
 
 use hecs::World;
 
@@ -17,6 +20,7 @@ pub struct Peer<E: Endpoint> {
     pub outgoing_packets: VecDeque<E::Outgoing>,
     pub registry: NetComponentRegistry,
     pub state: E::State,
+    time_origin: Instant,
     events: VecDeque<Event<E>>,
 }
 
@@ -32,6 +36,7 @@ impl<E: Endpoint> Peer<E> {
             outgoing_packets: VecDeque::new(),
             registry: NetComponentRegistry::new_with_all_components(),
             state: E::State::default(),
+            time_origin: Instant::now(),
             events: VecDeque::new(),
         }
     }
@@ -55,5 +60,9 @@ impl<E: Endpoint> Peer<E> {
                 Event::DebugRun(f) => f(self),
             }
         }
+    }
+
+    pub fn elapsed_time(&self) -> Duration {
+        self.time_origin.elapsed()
     }
 }

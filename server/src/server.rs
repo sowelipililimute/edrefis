@@ -19,6 +19,10 @@ impl Endpoint for ServerEndpoint {
                 peer.outgoing_packets
                     .push_back((0, ServerToClient::States(states)));
             }
+            ClientToServer::Ping(secs, nanos) => {
+                peer.outgoing_packets
+                    .push_back((0, ServerToClient::Pong(secs, nanos)));
+            }
         }
     }
 }

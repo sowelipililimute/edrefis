@@ -9,9 +9,11 @@ use crate::net::States;
 #[derive(SerJson, DeJson, Clone)]
 pub enum ClientToServer {
     Join,
+    Ping(u64, u32),
 }
 
 #[derive(SerJson, DeJson, Clone)]
 pub enum ServerToClient {
     States(States),
+    Pong(u64, u32),
 }
