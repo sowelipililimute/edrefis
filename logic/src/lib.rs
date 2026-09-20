@@ -5,6 +5,7 @@
 pub mod field;
 pub mod hooks;
 pub mod input;
+pub mod instant;
 pub mod net;
 pub mod peer;
 pub mod piece;

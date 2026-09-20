@@ -22,16 +22,16 @@ pub struct ClientSounds<'mixer> {
     pieces7: mixer::Audio,
 }
 
-const LOCK: &'static [u8] = include_bytes!("audio/lock.wav");
-const LAND: &'static [u8] = include_bytes!("audio/land.wav");
-const LINECLEAR: &'static [u8] = include_bytes!("audio/lineclear.wav");
-const PIECES1: &'static [u8] = include_bytes!("audio/pieces1.wav");
-const PIECES2: &'static [u8] = include_bytes!("audio/pieces2.wav");
-const PIECES3: &'static [u8] = include_bytes!("audio/pieces3.wav");
-const PIECES4: &'static [u8] = include_bytes!("audio/pieces4.wav");
-const PIECES5: &'static [u8] = include_bytes!("audio/pieces5.wav");
-const PIECES6: &'static [u8] = include_bytes!("audio/pieces6.wav");
-const PIECES7: &'static [u8] = include_bytes!("audio/pieces7.wav");
+const LOCK: &'static [u8] = include_bytes!("../../client/src/audio/lock.wav");
+const LAND: &'static [u8] = include_bytes!("../../client/src/audio/land.wav");
+const LINECLEAR: &'static [u8] = include_bytes!("../../client/src/audio/lineclear.wav");
+const PIECES1: &'static [u8] = include_bytes!("../../client/src/audio/pieces1.wav");
+const PIECES2: &'static [u8] = include_bytes!("../../client/src/audio/pieces2.wav");
+const PIECES3: &'static [u8] = include_bytes!("../../client/src/audio/pieces3.wav");
+const PIECES4: &'static [u8] = include_bytes!("../../client/src/audio/pieces4.wav");
+const PIECES5: &'static [u8] = include_bytes!("../../client/src/audio/pieces5.wav");
+const PIECES6: &'static [u8] = include_bytes!("../../client/src/audio/pieces6.wav");
+const PIECES7: &'static [u8] = include_bytes!("../../client/src/audio/pieces7.wav");
 
 impl<'mixer> Sounds for ClientSounds<'mixer> {
     fn line_clear(&mut self) {

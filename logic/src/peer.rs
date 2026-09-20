@@ -1,11 +1,8 @@
-use std::{
-    collections::VecDeque,
-    time::{Duration, Instant},
-};
+use std::{collections::VecDeque, time::Duration};
 
 use hecs::World;
 
-use crate::net::NetComponentRegistry;
+use crate::{instant::Instant, net::NetComponentRegistry};
 
 pub trait Endpoint: Sized {
     type Incoming;

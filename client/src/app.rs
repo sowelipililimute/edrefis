@@ -1,12 +1,12 @@
 use logic::{
-    field::{field_system, spawn_field, GameState},
+    field::{GameState, field_system, spawn_field},
     hooks::{Cubes, Sounds},
     input::{InputProvider, Inputs},
     piece::Piece,
     well::Well,
 };
 
-use crate::{client::Client, gpu::State, graphics_gpu::Graphics};
+use crate::{client::Client, gpu::State, graphics::Graphics};
 
 pub struct App<'a> {
     client: Client,
@@ -48,7 +48,7 @@ impl<'a> App<'a> {
             .query_mut::<(&Well, &u32, &GameState, &Piece)>()
         {
             match state {
-                GameState::ActivePiece { ref piece, .. } => {
+                GameState::ActivePiece { piece, .. } => {
                     self.graphics
                         .render(*level, well, Some(piece), next, &mut self.gpu)?
                 }

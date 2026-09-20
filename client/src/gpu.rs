@@ -6,7 +6,7 @@
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles};
 use glyphon::fontdb;
 use std::{borrow::Cow, rc::Rc, sync::Arc};
-use wgpu::{util::DeviceExt, UncapturedErrorHandler};
+use wgpu::{UncapturedErrorHandler, util::DeviceExt};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -745,7 +745,7 @@ impl State<'_> {
         if self.vertices.is_empty() {
             return Ok(());
         }
-        let (_, ref mut render_pass) = self
+        let (_, render_pass) = self
             .active_render_pass
             .as_mut()
             .ok_or("tried to draw without a render pass being active")?;
@@ -861,7 +861,7 @@ impl State<'_> {
             .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to prepare a text render: {}", e))?;
 
-        let (_, ref mut render_pass) = self
+        let (_, render_pass) = self
             .active_render_pass
             .as_mut()
             .ok_or("tried to draw without a render pass being active")?;

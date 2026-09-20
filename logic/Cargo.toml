@@ -10,3 +10,6 @@ edition = "2021"
 [dependencies]
 hecs = { workspace = true }
 nanoserde = { workspace = true }
+
+[target.'cfg(target_family="wasm")'.dependencies]
+web-sys = { workspace = true }

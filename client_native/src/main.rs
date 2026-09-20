@@ -1,7 +1,9 @@
-use crate::app::App;
-use crate::gpu;
-use crate::graphics_gpu::Graphics;
-use crate::sounds_sdl::ClientSounds;
+mod sounds;
+
+use crate::sounds::ClientSounds;
+use client::app::App;
+use client::gpu;
+use client::graphics::Graphics;
 use logic::{
     hooks::Cubes,
     input::{Input, InputProvider},

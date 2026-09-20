@@ -7,7 +7,7 @@ edition = "2024"
 name = "edrefis_tests"
 
 [dependencies]
-app = { path = "../app" }
+client = { path = "../client" }
 logic = { path = "../logic" }
 server = { path = "../server" }
 hecs = { workspace = true }

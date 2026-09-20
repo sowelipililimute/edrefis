@@ -1,0 +1,17 @@
+[package]
+name = "client_web"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+client = { path = "../client" }
+web-sys = { workspace = true }
+futures = "0.3.31"
+wasm-bindgen = "0.2.99"
+wasm-bindgen-futures = "0.4.49"
+console_error_panic_hook = "0.1.7"
+logic = { path = "../logic" }
+wgpu = { workspace = true }

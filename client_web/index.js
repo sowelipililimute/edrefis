@@ -1,4 +1,4 @@
-import init, { new_app } from './pkg/edrefis_web.js'
+import init, { new_app } from './pkg/client_web.js'
 
 const canvas = document.getElementById("canvas")
 

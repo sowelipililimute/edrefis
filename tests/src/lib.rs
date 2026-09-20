@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use app::client::{Client, ClientPeer};
+use client::client::{Client, ClientPeer};
 use futures_util::{SinkExt, StreamExt};
 use hecs::{Entity, World};
 use logic::net::*;

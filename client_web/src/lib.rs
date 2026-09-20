@@ -2,15 +2,18 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    panic::{self, PanicHookInfo},
+};
 
-use crate::{app::App, gpu::State, graphics_gpu::Graphics};
+use client::{app::App, gpu::State, graphics::Graphics};
 use logic::{
     hooks::{Cubes, Sounds},
     input::{Input, InputProvider},
 };
 use wasm_bindgen::prelude::wasm_bindgen;
-use web_sys::{console, HtmlCanvasElement};
+use web_sys::{HtmlCanvasElement, console};
 use wgpu::SurfaceTarget;
 
 struct DummyImpl;
@@ -133,4 +136,36 @@ impl WebApp {
     pub fn key_up(&mut self, event: web_sys::KeyboardEvent) {
         self.input_provider.release_key(event.code());
     }
+}
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn error(msg: String);
+
+    type Error;
+
+    #[wasm_bindgen(constructor)]
+    fn new() -> Error;
+
+    #[wasm_bindgen(structural, method, getter)]
+    fn stack(error: &Error) -> String;
+}
+
+fn hook_impl(info: &PanicHookInfo) {
+    let mut msg = info.to_string();
+
+    msg.push_str("\n\nStack:\n\n");
+    let e = Error::new();
+    let stack = e.stack();
+    msg.push_str(&stack);
+    msg.push_str("\n\n");
+
+    console::error_1(&msg.into());
+}
+
+#[wasm_bindgen]
+pub async fn new_app(canvas: web_sys::HtmlCanvasElement) -> Result<WebApp, String> {
+    panic::set_hook(Box::new(hook_impl));
+
+    WebApp::new(canvas).await
 }
