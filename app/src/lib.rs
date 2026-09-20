@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+mod app;
 pub mod client;
 mod gpu;
 mod graphics_gpu;
@@ -14,6 +15,6 @@ mod main_web;
 
 #[cfg(target_family = "wasm")]
 #[wasm_bindgen]
-pub async fn new_app(canvas: web_sys::HtmlCanvasElement) -> Result<main_web::App, String> {
-    main_web::App::new(canvas).await
+pub async fn new_app(canvas: web_sys::HtmlCanvasElement) -> Result<main_web::WebApp, String> {
+    main_web::WebApp::new(canvas).await
 }

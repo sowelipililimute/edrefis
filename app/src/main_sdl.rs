@@ -1,7 +1,7 @@
-use crate::client::Client;
 use crate::gpu;
 use crate::graphics_gpu::Graphics;
 use crate::sounds_sdl::ClientSounds;
+use crate::{app::App, client::Client};
 use logic::{
     field::{field_system, spawn_field, GameState},
     hooks::Cubes,
@@ -102,18 +102,14 @@ pub fn main() -> Result<(), String> {
         },
         Box::new(|error| eprintln!("Unhandled GPU error {error}")),
     ))?;
-    let mut graphics = Graphics::new(&mut gpu_state)?;
+    let graphics = Graphics::new(&mut gpu_state)?;
 
-    let mut client = Client::new();
-    spawn_field(&mut client.world);
+    let mut app = App::new(graphics, gpu_state);
     let mut input_provider = SDLInputs::new();
-    let mut inputs = Inputs::new();
 
     let mut event_pump = ctx.event_pump().map_err(|e| e.to_string())?;
     let mut sounds = ClientSounds::new(&mixer).map_err(|e| e.to_string())?;
     let mut cubes = DummyImpl {};
-
-    let mut ticks = 0u64;
 
     let mut stepper = nanotime::StepData::new(Duration::from_secs_f64(1. / 60.));
 
@@ -124,9 +120,7 @@ pub fn main() -> Result<(), String> {
                     window_id,
                     win_event: WindowEvent::PixelSizeChanged(width, height),
                     ..
-                } if window_id == window.id() => {
-                    gpu_state.resize(width as u32, height as u32)?;
-                }
+                } if window_id == window.id() => app.resize(width as u32, height as u32)?,
                 Event::KeyDown {
                     keycode:
                         Some(
@@ -164,24 +158,8 @@ pub fn main() -> Result<(), String> {
             }
         }
 
-        ticks += 1;
-        inputs.tick(ticks, &mut input_provider);
-
-        field_system(&mut client.world, &inputs, &mut sounds, &mut cubes);
-
-        for (well, level, state, next) in client
-            .world
-            .query_mut::<(&Well, &u32, &GameState, &Piece)>()
-        {
-            match state {
-                GameState::ActivePiece { ref piece, .. } => {
-                    graphics.render(*level, well, Some(piece), next, &mut gpu_state)?;
-                }
-                _ => {
-                    graphics.render(*level, well, None, next, &mut gpu_state)?;
-                }
-            }
-        }
+        app.tick(&mut input_provider, &mut sounds, &mut cubes);
+        app.render_world()?;
 
         stepper.step();
     }

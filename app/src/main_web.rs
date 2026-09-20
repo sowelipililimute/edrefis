@@ -4,16 +4,12 @@
 
 use std::collections::HashSet;
 
-use crate::{gpu::State, graphics_gpu::Graphics};
-use hecs::World;
+use crate::{app::App, gpu::State, graphics_gpu::Graphics};
 use logic::{
-    field::{field_system, spawn_field, GameState},
     hooks::{Cubes, Sounds},
-    input::{Input, InputProvider, Inputs},
-    piece::Piece,
-    well::Well,
+    input::{Input, InputProvider},
 };
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::prelude::wasm_bindgen;
 use web_sys::{console, HtmlCanvasElement};
 use wgpu::SurfaceTarget;
 
@@ -29,13 +25,9 @@ impl Sounds for DummyImpl {
 }
 
 #[wasm_bindgen]
-pub struct App {
-    gpu: State<'static>,
-    graphics: Graphics,
-    world: World,
-    inputs: Inputs,
+pub struct WebApp {
+    app: App<'static>,
     input_provider: WebInputs,
-    ticks: u64,
 }
 
 fn input_to_web_code(key: Input) -> &'static str {
@@ -88,8 +80,8 @@ impl InputProvider for WebInputs {
     }
 }
 
-impl App {
-    pub async fn new(canvas: HtmlCanvasElement) -> Result<App, String> {
+impl WebApp {
+    pub async fn new(canvas: HtmlCanvasElement) -> Result<WebApp, String> {
         let mut gpu = State::new(
             canvas.width(),
             canvas.height(),
@@ -109,52 +101,31 @@ impl App {
         let graphics =
             Graphics::new(&mut gpu).map_err(|e| format!("failed to load graphics: {}", e))?;
 
-        let mut world = World::new();
-        spawn_field(&mut world);
+        let app = App::new(graphics, gpu);
 
-        Ok(App {
-            gpu,
-            graphics,
-            world,
-            // field: Field::new(),
-            inputs: Inputs::new(),
+        Ok(WebApp {
+            app,
             input_provider: WebInputs::new(),
-            ticks: 0u64,
         })
     }
 }
 
 #[wasm_bindgen]
-impl App {
+impl WebApp {
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
-        self.gpu
+        self.app
             .resize(width, height)
             .map_err(|e| format!("failed to resize canvas: {}", e))
     }
     pub fn tick(&mut self) {
         let mut sounds = DummyImpl;
         let mut cubes = DummyImpl;
-        self.ticks += 1;
-        self.inputs.tick(self.ticks, &mut self.input_provider);
-        field_system(&mut self.world, &self.inputs, &mut sounds, &mut cubes);
+
+        self.app
+            .tick(&mut self.input_provider, &mut sounds, &mut cubes);
     }
     pub fn draw(&mut self) -> Result<(), String> {
-        for (well, level, state, next) in
-            self.world.query_mut::<(&Well, &u32, &GameState, &Piece)>()
-        {
-            match state {
-                GameState::ActivePiece { ref piece, .. } => {
-                    self.graphics
-                        .render(*level, well, Some(piece), next, &mut self.gpu)?;
-                }
-                _ => {
-                    self.graphics
-                        .render(*level, well, None, next, &mut self.gpu)?;
-                }
-            }
-        }
-
-        Ok(())
+        self.app.render_world()
     }
     pub fn key_down(&mut self, event: web_sys::KeyboardEvent) {
         self.input_provider.push_key(event.code());
