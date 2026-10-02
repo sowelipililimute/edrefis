@@ -6,7 +6,9 @@ async function run() {
   await init()
   const app = await new_app(canvas)
   let resize = false
-  let last_tick = performance.now()
+  const TICK_MS = 1000 / 60
+  let last_frame = performance.now()
+  let behind = 0
 
   const observer = new ResizeObserver(() => resize = true)
   observer.observe(canvas)
@@ -18,9 +20,12 @@ async function run() {
       app.resize(canvas.width, canvas.height)
       resize = false
     }
-    if ((last_tick - performance.now()) <= 1) {
+    const now = performance.now()
+    behind = Math.min(behind + now - last_frame, TICK_MS * 5)
+    last_frame = now
+    while (behind >= TICK_MS) {
       app.tick()
-      last_tick = performance.now()
+      behind -= TICK_MS
     }
     app.draw()
 

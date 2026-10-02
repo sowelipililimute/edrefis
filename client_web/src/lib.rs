@@ -2,35 +2,18 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::{
-    collections::HashSet,
-    panic::{self, PanicHookInfo},
-};
+use std::panic::{self, PanicHookInfo};
 
-use client::{app::App, gpu::State, graphics::Graphics};
-use logic::{
-    hooks::{Cubes, Sounds},
-    input::{Input, InputProvider},
-};
+use client::{app::App, gpu::State, graphics::Graphics, input::KeyboardInputs};
+use logic::{hooks::NoopHooks, input::Input};
 use wasm_bindgen::prelude::wasm_bindgen;
 use web_sys::{HtmlCanvasElement, console};
 use wgpu::SurfaceTarget;
 
-struct DummyImpl;
-impl Cubes for DummyImpl {
-    fn spawn_cube(&mut self, _x: i32, _y: i32, _color: logic::well::Block) {}
-}
-impl Sounds for DummyImpl {
-    fn block_spawn(&mut self, _color: logic::well::Block) {}
-    fn line_clear(&mut self) {}
-    fn lock(&mut self) {}
-    fn land(&mut self) {}
-}
-
 #[wasm_bindgen]
 pub struct WebApp {
     app: App<'static>,
-    input_provider: WebInputs,
+    input_provider: KeyboardInputs<String>,
 }
 
 fn input_to_web_code(key: Input) -> &'static str {
@@ -42,44 +25,6 @@ fn input_to_web_code(key: Input) -> &'static str {
         Input::CW => "KeyX",
         Input::CCW => "KeyZ",
         Input::DebugLevel => "KeyC",
-    }
-}
-
-struct WebInputs {
-    just_pressed_key: HashSet<String>,
-    current_key: HashSet<String>,
-}
-
-impl WebInputs {
-    fn new() -> WebInputs {
-        WebInputs {
-            just_pressed_key: HashSet::new(),
-            current_key: HashSet::new(),
-        }
-    }
-    fn push_key(&mut self, keycode: String) {
-        self.just_pressed_key.insert(keycode.clone());
-        self.current_key.insert(keycode);
-    }
-    fn release_key(&mut self, keycode: String) {
-        self.just_pressed_key.remove(&keycode);
-        self.current_key.remove(&keycode);
-    }
-}
-
-impl InputProvider for WebInputs {
-    fn peek(&mut self) {}
-
-    fn consume(&mut self) {
-        self.just_pressed_key.clear();
-    }
-
-    fn key_just_pressed(&self, input: Input) -> bool {
-        self.just_pressed_key.contains(input_to_web_code(input))
-    }
-
-    fn key_down(&self, input: Input) -> bool {
-        self.current_key.contains(input_to_web_code(input))
     }
 }
 
@@ -108,7 +53,7 @@ impl WebApp {
 
         Ok(WebApp {
             app,
-            input_provider: WebInputs::new(),
+            input_provider: KeyboardInputs::new(|input| input_to_web_code(input).to_string()),
         })
     }
 }
@@ -121,11 +66,8 @@ impl WebApp {
             .map_err(|e| format!("failed to resize canvas: {}", e))
     }
     pub fn tick(&mut self) {
-        let mut sounds = DummyImpl;
-        let mut cubes = DummyImpl;
-
         self.app
-            .tick(&mut self.input_provider, &mut sounds, &mut cubes);
+            .tick(&mut self.input_provider, &mut NoopHooks, &mut NoopHooks);
     }
     pub fn draw(&mut self) -> Result<(), String> {
         self.app.render_world()
@@ -134,7 +76,7 @@ impl WebApp {
         self.input_provider.push_key(event.code());
     }
     pub fn key_up(&mut self, event: web_sys::KeyboardEvent) {
-        self.input_provider.release_key(event.code());
+        self.input_provider.release_key(&event.code());
     }
 }
 #[wasm_bindgen]

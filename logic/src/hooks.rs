@@ -14,3 +14,16 @@ pub trait Sounds {
     fn lock(&mut self);
     fn land(&mut self);
 }
+
+pub struct NoopHooks;
+
+impl Cubes for NoopHooks {
+    fn spawn_cube(&mut self, _x: i32, _y: i32, _color: Block) {}
+}
+
+impl Sounds for NoopHooks {
+    fn block_spawn(&mut self, _color: Block) {}
+    fn line_clear(&mut self) {}
+    fn lock(&mut self) {}
+    fn land(&mut self) {}
+}

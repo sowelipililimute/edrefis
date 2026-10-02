@@ -4,25 +4,11 @@ use crate::sounds::ClientSounds;
 use client::app::App;
 use client::gpu;
 use client::graphics::Graphics;
-use logic::{
-    hooks::Cubes,
-    input::{Input, InputProvider},
-    well::WELL_COLS,
-};
+use client::input::KeyboardInputs;
+use logic::{hooks::NoopHooks, input::Input, well::WELL_COLS};
 use sdl::{event::Event, event::WindowEvent, keyboard::Keycode};
 use sdl3::{self as sdl};
-use std::{collections::HashSet, time::Duration};
-
-#[derive(Clone, Copy)]
-struct DummyImpl;
-impl Cubes for DummyImpl {
-    fn spawn_cube(&mut self, _x: i32, _y: i32, _color: logic::well::Block) {}
-}
-
-struct SDLInputs {
-    just_pressed_key: HashSet<Keycode>,
-    current_key: HashSet<Keycode>,
-}
+use std::time::Duration;
 
 fn input_to_sdl_key(keycode: Input) -> Keycode {
     match keycode {
@@ -33,39 +19,6 @@ fn input_to_sdl_key(keycode: Input) -> Keycode {
         Input::CW => Keycode::X,
         Input::CCW => Keycode::Z,
         Input::DebugLevel => Keycode::C,
-    }
-}
-
-impl SDLInputs {
-    fn new() -> SDLInputs {
-        SDLInputs {
-            just_pressed_key: HashSet::new(),
-            current_key: HashSet::new(),
-        }
-    }
-    fn push_key(&mut self, keycode: Keycode) {
-        self.just_pressed_key.insert(keycode);
-        self.current_key.insert(keycode);
-    }
-    fn release_key(&mut self, keycode: Keycode) {
-        self.just_pressed_key.remove(&keycode);
-        self.current_key.remove(&keycode);
-    }
-}
-
-impl InputProvider for SDLInputs {
-    fn peek(&mut self) {}
-
-    fn consume(&mut self) {
-        self.just_pressed_key.clear();
-    }
-
-    fn key_just_pressed(&self, input: Input) -> bool {
-        self.just_pressed_key.contains(&input_to_sdl_key(input))
-    }
-
-    fn key_down(&self, input: Input) -> bool {
-        self.current_key.contains(&input_to_sdl_key(input))
     }
 }
 
@@ -105,11 +58,10 @@ pub fn main() -> Result<(), String> {
     let graphics = Graphics::new(&mut gpu_state)?;
 
     let mut app = App::new(graphics, gpu_state);
-    let mut input_provider = SDLInputs::new();
+    let mut input_provider = KeyboardInputs::new(input_to_sdl_key);
 
     let mut event_pump = ctx.event_pump().map_err(|e| e.to_string())?;
     let mut sounds = ClientSounds::new(&mixer).map_err(|e| e.to_string())?;
-    let mut cubes = DummyImpl {};
 
     let mut stepper = nanotime::StepData::new(Duration::from_secs_f64(1. / 60.));
 
@@ -122,35 +74,11 @@ pub fn main() -> Result<(), String> {
                     ..
                 } if window_id == window.id() => app.resize(width as u32, height as u32)?,
                 Event::KeyDown {
-                    keycode:
-                        Some(
-                            x @ (Keycode::X
-                            | Keycode::Z
-                            | Keycode::Up
-                            | Keycode::Down
-                            | Keycode::Left
-                            | Keycode::Right
-                            | Keycode::C),
-                        ),
-                    ..
-                } => {
-                    input_provider.push_key(x);
-                }
+                    keycode: Some(key), ..
+                } => input_provider.push_key(key),
                 Event::KeyUp {
-                    keycode:
-                        Some(
-                            x @ (Keycode::X
-                            | Keycode::Z
-                            | Keycode::Up
-                            | Keycode::Down
-                            | Keycode::Left
-                            | Keycode::Right
-                            | Keycode::C),
-                        ),
-                    ..
-                } => {
-                    input_provider.release_key(x);
-                }
+                    keycode: Some(key), ..
+                } => input_provider.release_key(&key),
                 Event::Quit { .. } => {
                     break 'running;
                 }
@@ -158,7 +86,7 @@ pub fn main() -> Result<(), String> {
             }
         }
 
-        app.tick(&mut input_provider, &mut sounds, &mut cubes);
+        app.tick(&mut input_provider, &mut sounds, &mut NoopHooks);
         app.render_world()?;
 
         stepper.step();
