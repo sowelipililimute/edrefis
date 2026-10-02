@@ -7,7 +7,7 @@ use nanoserde::{DeJson, SerJson};
 
 use crate::{
     hooks::{Cubes, Sounds},
-    input::{Input, Inputs},
+    input::{FrameInputs, Input, InputState, PendingInput},
     piece::Piece,
     randomizer::Randomizer,
     well::Well,
@@ -105,23 +105,30 @@ pub fn spawn_field(world: &mut World) -> Entity {
             piece: randomizer.next_piece(),
         },
         randomizer,
+        InputState::default(),
+        PendingInput(FrameInputs::default()),
     ))
 }
 
-pub fn field_system(
-    world: &mut World,
-    inputs: &Inputs,
-    sounds: &mut dyn Sounds,
-    cubes: &mut dyn Cubes,
-) {
-    for (well, next, level, state, randomizer) in world.query_mut::<(
+pub fn set_input(world: &mut World, field: Entity, frame: FrameInputs) {
+    if let Ok(mut p) = world.get::<&mut PendingInput>(field) {
+        p.0 = frame;
+    }
+}
+
+pub fn field_system(world: &mut World, tick: u64, sounds: &mut dyn Sounds, cubes: &mut dyn Cubes) {
+    for (well, next, level, state, randomizer, inputs, pending_input) in world.query_mut::<(
         &mut Well,
         &mut Piece,
         &mut u32,
         &mut GameState,
         &mut Randomizer,
+        &mut InputState,
+        &PendingInput,
     )>() {
-        if inputs.key_just_pressed(Input::DebugLevel) {
+        inputs.tick(tick, pending_input.0);
+
+        if inputs.just_pressed(Input::DebugLevel) {
             *level += 50;
         }
         match state {
@@ -175,9 +182,9 @@ pub fn field_system(
             } => {
                 *ticks_remaining -= 1;
                 if *ticks_remaining == 0 {
-                    if inputs.key_pressed(Input::CW) {
+                    if inputs.pressed(Input::CW) || inputs.pressed(Input::CW2) {
                         next.rotation = next.rotation.cw();
-                    } else if inputs.key_pressed(Input::CCW) {
+                    } else if inputs.pressed(Input::CCW) || inputs.pressed(Input::CCW2) {
                         next.rotation = next.rotation.ccw();
                     }
                     if *level % 100 != 99 {

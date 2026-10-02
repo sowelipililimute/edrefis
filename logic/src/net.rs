@@ -3,7 +3,9 @@ use std::{any::TypeId, collections::HashMap};
 use hecs::{Entity, EntityBuilder, World};
 use nanoserde::{DeJson, SerJson};
 
-use crate::{field::GameState, piece::Piece, randomizer::Randomizer, well::Well};
+use crate::{
+    field::GameState, input::InputState, piece::Piece, randomizer::Randomizer, well::Well,
+};
 
 #[derive(Debug)]
 pub struct Replicated;
@@ -106,6 +108,7 @@ impl NetComponentRegistry {
         registry.register::<u32>("Level");
         registry.register::<GameState>("GameState");
         registry.register::<Piece>("ActivePiece");
+        registry.register::<InputState>("InputState");
         registry
     }
 

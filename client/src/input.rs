@@ -1,48 +1,42 @@
 use std::{collections::HashSet, hash::Hash};
 
-use logic::input::{Input, InputProvider};
+use logic::input::{FrameInputs, Input};
 
-pub struct KeyboardInputs<K> {
+pub trait ClientInputs {
+    fn sample(&self) -> FrameInputs;
+}
+
+pub struct KeyboardInputs<K: Eq + Hash + Clone> {
     binding: fn(Input) -> K,
-    just_pressed: HashSet<K>,
     down: HashSet<K>,
 }
 
-impl<K: Eq + Hash> KeyboardInputs<K> {
+impl<K: Eq + Hash + Clone> KeyboardInputs<K> {
     pub fn new(binding: fn(Input) -> K) -> Self {
         KeyboardInputs {
             binding,
-            just_pressed: HashSet::new(),
             down: HashSet::new(),
         }
     }
 
-    pub fn push_key(&mut self, key: K)
-    where
-        K: Clone,
-    {
-        self.just_pressed.insert(key.clone());
+    pub fn push_key(&mut self, key: K) {
         self.down.insert(key);
     }
 
     pub fn release_key(&mut self, key: &K) {
-        self.just_pressed.remove(key);
         self.down.remove(key);
     }
 }
 
-impl<K: Eq + Hash> InputProvider for KeyboardInputs<K> {
-    fn peek(&mut self) {}
-
-    fn consume(&mut self) {
-        self.just_pressed.clear();
-    }
-
-    fn key_just_pressed(&self, input: Input) -> bool {
-        self.just_pressed.contains(&(self.binding)(input))
-    }
-
-    fn key_down(&self, input: Input) -> bool {
-        self.down.contains(&(self.binding)(input))
+impl<K: Eq + Hash + Clone> ClientInputs for KeyboardInputs<K> {
+    fn sample(&self) -> FrameInputs {
+        let mut frame = FrameInputs::default();
+        for input in Input::ALL {
+            let k = (self.binding)(input);
+            if self.down.contains(&k) {
+                frame = frame.with(input);
+            }
+        }
+        frame
     }
 }

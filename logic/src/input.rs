@@ -2,142 +2,136 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashMap;
-
 use nanoserde::{DeJson, SerJson};
 
-pub trait InputProvider {
-    fn peek(&mut self);
-    fn consume(&mut self);
-    fn key_just_pressed(&self, input: Input) -> bool;
-    fn key_down(&self, input: Input) -> bool;
-}
-
-#[derive(DeJson, SerJson, Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[repr(u8)]
 pub enum Input {
-    Up,
-    Down,
-    Left,
-    Right,
-    CW,
-    CCW,
-    DebugLevel,
+    Up = 0,
+    Down = 1,
+    Left = 2,
+    Right = 3,
+    CW = 4,
+    CW2 = 5,
+    CCW = 6,
+    CCW2 = 7,
+    DebugLevel = 8,
 }
 
-pub struct Inputs {
-    inputs: HashMap<Input, u16>,
-    inputs_up: HashMap<Input, u16>,
-    inputs_tickstamps: HashMap<Input, u64>,
+impl Input {
+    pub const COUNT: usize = 9;
+    pub const ALL: [Input; Input::COUNT] = [
+        Input::Up,
+        Input::Down,
+        Input::Left,
+        Input::Right,
+        Input::CW,
+        Input::CW2,
+        Input::CCW,
+        Input::CCW2,
+        Input::DebugLevel,
+    ];
 }
 
-pub const INPUTS: &[Input] = &[
-    Input::Up,
-    Input::Down,
-    Input::Left,
-    Input::Right,
-    Input::CCW,
-    Input::CW,
-    Input::DebugLevel,
-];
+#[derive(Debug, Default, Copy, Clone, SerJson, DeJson)]
+#[repr(transparent)]
+pub struct FrameInputs(u16);
 
-impl Inputs {
-    pub fn new() -> Inputs {
-        Inputs {
-            inputs: HashMap::new(),
-            inputs_tickstamps: HashMap::new(),
-            inputs_up: HashMap::new(),
-        }
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(transparent)]
+pub struct PendingInput(pub FrameInputs);
+
+impl FrameInputs {
+    pub fn is_set(self, i: Input) -> bool {
+        self.0 & 1 << i as u16 != 0
     }
+    pub fn with(self, i: Input) -> FrameInputs {
+        FrameInputs(self.0 | 1 << i as u16)
+    }
+}
 
-    fn key_down(&self, code: Input, provider: &mut dyn InputProvider) -> bool {
+#[derive(Debug, Clone, SerJson, DeJson, Default)]
+pub struct InputState {
+    previous: FrameInputs,
+    inputs: [u64; Input::COUNT],
+    input_tickstamps: [u64; Input::COUNT],
+    inputs_up: [u64; Input::COUNT],
+}
+
+impl InputState {
+    pub fn key_down(&self, code: Input, frame: FrameInputs) -> bool {
         match code {
             Input::Left | Input::Right | Input::Up | Input::Down => {
-                let left = self.inputs_tickstamps.get(&Input::Left).unwrap_or(&0);
-                let right = self.inputs_tickstamps.get(&Input::Right).unwrap_or(&0);
-                let up = self.inputs_tickstamps.get(&Input::Up).unwrap_or(&0);
-                let down = self.inputs_tickstamps.get(&Input::Down).unwrap_or(&0);
+                let left = self.input_tickstamps[Input::Left as usize];
+                let right = self.input_tickstamps[Input::Right as usize];
+                let up = self.input_tickstamps[Input::Up as usize];
+                let down = self.input_tickstamps[Input::Down as usize];
 
                 if code == Input::Left
                     && left >= right
                     && left >= up
                     && left >= down
-                    && provider.key_down(code)
+                    && frame.is_set(code)
                 {
                     true
                 } else if code == Input::Right
                     && right >= left
                     && right >= up
                     && right >= down
-                    && provider.key_down(code)
+                    && frame.is_set(code)
                 {
                     true
                 } else if code == Input::Up
                     && up >= down
                     && up >= left
                     && up >= right
-                    && provider.key_down(code)
+                    && frame.is_set(code)
                 {
                     true
                 } else if code == Input::Down
                     && down >= up
                     && down >= left
                     && down >= right
-                    && provider.key_down(code)
+                    && frame.is_set(code)
                 {
                     true
                 } else {
                     false
                 }
             }
-            _ => provider.key_down(code),
+            _ => frame.is_set(code),
         }
     }
-    pub fn tick(&mut self, tick: u64, provider: &mut dyn InputProvider) {
-        provider.peek();
-        for input in INPUTS {
-            if provider.key_just_pressed(*input) {
-                self.inputs_tickstamps.insert(*input, tick);
+    pub fn tick(&mut self, tick: u64, frame: FrameInputs) {
+        let rising = frame.0 & !self.previous.0;
+        for i in Input::ALL {
+            if rising & 1 << i as u16 != 0 {
+                self.input_tickstamps[i as usize] = tick;
             }
         }
-        for input in INPUTS {
-            if self.key_down(*input, provider) {
-                self.inputs
-                    .entry(*input)
-                    .and_modify(|x| *x = *x + 1)
-                    .or_insert(1);
-                self.inputs_up.insert(*input, 0);
+        for input in Input::ALL {
+            if self.key_down(input, frame) {
+                self.inputs[input as usize] += 1;
+                self.inputs_up[input as usize] = 0;
             } else {
-                self.inputs_up
-                    .entry(*input)
-                    .and_modify(|x| *x = *x + 1)
-                    .or_insert(1);
-                self.inputs.insert(*input, 0);
+                self.inputs_up[input as usize] += 1;
+                self.inputs[input as usize] = 0;
             }
         }
-        provider.consume();
     }
-    pub fn key_pressed(&self, input: Input) -> bool {
-        self.inputs.get(&input).unwrap_or(&0) > &0
+    pub fn pressed(&self, input: Input) -> bool {
+        self.inputs[input as usize] > 0
     }
-    pub fn key_just_pressed(&self, input: Input) -> bool {
-        self.inputs.get(&input).unwrap_or(&0) == &1
+    pub fn just_pressed(&self, input: Input) -> bool {
+        self.inputs[input as usize] == 1
     }
-    pub fn key_just_released(&self, input: Input) -> bool {
-        self.inputs_up.get(&input).unwrap_or(&0) == &1
+    pub fn just_released(&self, input: Input) -> bool {
+        self.inputs_up[input as usize] == 1
     }
-    fn key_press_duration(&self, input: Input) -> u16 {
-        *self.inputs.get(&input).unwrap_or(&0)
+    pub fn press_duration(&self, input: Input) -> u64 {
+        self.inputs[input as usize]
     }
-    pub fn key_press_or_das(&self, input: Input, das: u16) -> bool {
-        self.key_just_pressed(input) || self.key_press_duration(input) > das
+    pub fn just_pressed_or_das(&self, input: Input, das: u64) -> bool {
+        self.just_pressed(input) || self.press_duration(input) > das
     }
 }
-
-pub const RECORDABLE_INPUTS: &[Input] = &[
-    Input::Up,
-    Input::Down,
-    Input::Left,
-    Input::Right,
-    Input::CCW,
-    Input::CW,
-];

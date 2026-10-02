@@ -18,7 +18,9 @@ fn input_to_sdl_key(keycode: Input) -> Keycode {
         Input::Right => Keycode::Right,
         Input::CW => Keycode::X,
         Input::CCW => Keycode::Z,
-        Input::DebugLevel => Keycode::C,
+        Input::CW2 => Keycode::V,
+        Input::CCW2 => Keycode::C,
+        Input::DebugLevel => Keycode::A,
     }
 }
 

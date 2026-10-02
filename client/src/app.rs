@@ -1,16 +1,16 @@
+use hecs::Entity;
 use logic::{
-    field::{GameState, field_system, spawn_field},
+    field::{GameState, field_system, set_input, spawn_field},
     hooks::{Cubes, Sounds},
-    input::{InputProvider, Inputs},
     piece::Piece,
     well::Well,
 };
 
-use crate::{client::Client, gpu::State, graphics::Graphics};
+use crate::{client::Client, gpu::State, graphics::Graphics, input::ClientInputs};
 
 pub struct App<'a> {
     client: Client,
-    inputs: Inputs,
+    field: Entity,
     ticks: u64,
     graphics: Graphics,
     gpu: State<'a>,
@@ -19,11 +19,11 @@ pub struct App<'a> {
 impl<'a> App<'a> {
     pub fn new(graphics: Graphics, gpu: State<'a>) -> App<'a> {
         let mut client = Client::new();
-        spawn_field(&mut client.world);
+        let field = spawn_field(&mut client.world);
 
         App {
             client,
-            inputs: Inputs::new(),
+            field,
             ticks: 0,
             graphics,
             gpu,
@@ -32,13 +32,13 @@ impl<'a> App<'a> {
 
     pub fn tick(
         self: &mut App<'a>,
-        input_provider: &mut dyn InputProvider,
+        inputs: &mut dyn ClientInputs,
         sounds: &mut dyn Sounds,
         cubes: &mut dyn Cubes,
     ) {
         self.ticks += 1;
-        self.inputs.tick(self.ticks, input_provider);
-        field_system(&mut self.client.world, &self.inputs, sounds, cubes);
+        set_input(&mut self.client.world, self.field, inputs.sample());
+        field_system(&mut self.client.world, self.ticks, sounds, cubes);
     }
 
     pub fn render_world(self: &mut App<'a>) -> Result<(), String> {
