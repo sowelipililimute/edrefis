@@ -3,8 +3,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::gpu::{
-    Camera2D, Camera3D, Context, Frame, Pass, RenderTarget, TextRenderer, Texture, parallelogram,
-    rectangle, solid_rectangle,
+    camera::{Camera2D, Camera3D},
+    context::{Context, Texture},
+    frame::{Frame, RenderTarget},
+    geometry::{parallelogram, rectangle, solid_rectangle},
+    pass::Pass,
+    text::TextRenderer,
 };
 use glam::{Vec2, Vec3};
 use logic::{
@@ -477,10 +481,7 @@ impl Graphics {
         ));
         pass.do_draw()?;
 
-        let point = text.world_to_view(
-            &mut pass,
-            Vec3::new(well_width / 2. + 1., well_height / -2., 0.),
-        );
+        let point = pass.world_to_view(Vec3::new(well_width / 2. + 1., well_height / -2., 0.));
         Graphics::score_text(&mut self.score_buffer, text, level_to_gravity(level), level);
         text.draw_text(&mut pass, &mut self.score_buffer, point)?;
 

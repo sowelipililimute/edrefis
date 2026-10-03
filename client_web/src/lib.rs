@@ -4,7 +4,7 @@
 
 use std::panic::{self, PanicHookInfo};
 
-use client::{app::App, gpu::Context, input::KeyboardInputs};
+use client::{app::App, gpu::context::Context, input::KeyboardInputs};
 use logic::{hooks::NoopHooks, input::Input};
 use wasm_bindgen::prelude::wasm_bindgen;
 use web_sys::{HtmlCanvasElement, console};

@@ -8,7 +8,7 @@ use logic::{
 
 use crate::{
     client::Client,
-    gpu::{Context, TextRenderer},
+    gpu::{context::Context, text::TextRenderer},
     graphics::Graphics,
     input::ClientInputs,
 };

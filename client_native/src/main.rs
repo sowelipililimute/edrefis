@@ -1,10 +1,8 @@
 mod sounds;
 
 use crate::sounds::ClientSounds;
-use client::app::App;
-use client::gpu;
-use client::graphics::Graphics;
 use client::input::KeyboardInputs;
+use client::{app::App, gpu};
 use logic::{hooks::NoopHooks, input::Input, well::WELL_COLS};
 use sdl::{event::Event, event::WindowEvent, keyboard::Keycode};
 use sdl3::{self as sdl};
@@ -47,7 +45,7 @@ pub fn main() -> Result<(), String> {
 
     let (width, height) = window.size();
 
-    let gpu_state = pollster::block_on(gpu::Context::new(
+    let gpu_state = pollster::block_on(gpu::context::Context::new(
         width,
         height,
         |instance| unsafe {
