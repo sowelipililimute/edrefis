@@ -311,11 +311,8 @@ impl Graphics {
                     let bx = j as f32;
                     let by = i as f32;
 
-                    state.queue_draw(rectangle(
-                        Vec3::new(bx, by, 0.),
-                        1.,
-                        1.,
-                        Vec2::ZERO,
+                    state.queue_draw(solid_rectangle(
+                        Vec2::new(bx, by),
                         Vec2::ONE,
                         wgpu::Color {
                             r: 0.,
@@ -334,8 +331,6 @@ impl Graphics {
             b: 0.9,
             a: 0.4,
         };
-        const DST_BLOCK_SIZE: f32 = 1.;
-        const DST_PIXEL_SIZE: f32 = 1. / 8.;
 
         for (i, row) in well.blocks.iter().enumerate() {
             for (j, col) in row.iter().enumerate() {
