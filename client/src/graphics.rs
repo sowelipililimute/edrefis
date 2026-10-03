@@ -71,6 +71,7 @@ fn at<T, R: AsRef<[T]>>(rows: &[R], x: i32, y: i32) -> Option<&T> {
 }
 
 const P: f32 = 1. / 8.;
+const WALL_DEPTH: f32 = 2.;
 
 fn edge_rect(dx: i32, dy: i32) -> (Vec2, Vec2) {
     let pos = |d: i32| if d > 0 { 1. - P } else { 0. };
@@ -165,9 +166,12 @@ impl Graphics {
             a: 0.1,
         };
 
+        let top_left = Vec3::new(well_width / -2., well_height / -2., WALL_DEPTH / 2.);
+        let toward_camera = -WALL_DEPTH * Vec3::Z;
+
         // well bg
         pass.queue_draw(parallelogram(
-            Vec3::new(well_width / -2., well_height / -2., -1.),
+            top_left,
             well_width * Vec3::X,
             well_height * Vec3::Y,
             Vec2::ZERO,
@@ -183,9 +187,9 @@ impl Graphics {
 
         // bottom
         pass.queue_draw(parallelogram(
-            Vec3::new(well_width / -2., well_height / -2., -1.),
+            top_left + well_height * Vec3::Y,
             well_width * Vec3::X,
-            2. * Vec3::Z,
+            toward_camera,
             Vec2::ZERO,
             Vec2::X,
             Vec2::Y,
@@ -194,9 +198,9 @@ impl Graphics {
 
         // left
         pass.queue_draw(parallelogram(
-            Vec3::new(well_width / -2., well_height / -2., -1.),
+            top_left,
             well_height * Vec3::Y,
-            2. * Vec3::Z,
+            toward_camera,
             Vec2::ZERO,
             Vec2::X,
             Vec2::Y,
@@ -205,9 +209,9 @@ impl Graphics {
 
         // right
         pass.queue_draw(parallelogram(
-            Vec3::new(well_width / 2., well_height / -2., -1.),
+            top_left + well_width * Vec3::X,
             well_height * Vec3::Y,
-            2. * Vec3::Z,
+            toward_camera,
             Vec2::ZERO,
             Vec2::X,
             Vec2::Y,
@@ -463,7 +467,7 @@ impl Graphics {
 
         pass.set_texture(Some(&self.next));
         pass.queue_draw(parallelogram(
-            Vec3::new(4. / -2., 4. / -2. + well_height / 2. + 1.5, 0.),
+            Vec3::new(4. / -2., well_height / -2. - 3.5, 0.),
             4. * Vec3::X,
             4. * Vec3::Y,
             Vec2::ZERO,
@@ -475,7 +479,7 @@ impl Graphics {
 
         let point = text.world_to_view(
             &mut pass,
-            Vec3::new(well_width / 2. + 1., well_height / 2., 0.),
+            Vec3::new(well_width / 2. + 1., well_height / -2., 0.),
         );
         Graphics::score_text(&mut self.score_buffer, text, level_to_gravity(level), level);
         text.draw_text(&mut pass, &mut self.score_buffer, point)?;

@@ -225,9 +225,9 @@ impl Camera for Camera3D {
 impl Default for Camera3D {
     fn default() -> Camera3D {
         Camera3D {
-            position: Vec3::new(0., 0., 35.),
+            position: Vec3::new(0., 0., -35.),
             target: Vec3::new(0., 0., 0.),
-            up: Vec3::Y,
+            up: Vec3::NEG_Y,
             fov_y: 45.0_f32.to_radians(),
         }
     }
