@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::gpu::{Camera2D, Camera3D, State, Texture, parallelogram, rectangle};
+use crate::gpu::{Camera2D, Camera3D, State, Texture, parallelogram, rectangle, solid_rectangle};
 use glam::{Vec2, Vec3};
 use logic::{
     field::level_to_gravity,
@@ -61,6 +61,19 @@ const BACKGROUNDS: &[&[u8]] = &[
     include_bytes!("gfx/level900.png"),
     include_bytes!("gfx/level1000.png"),
 ];
+
+fn at<T, R: AsRef<[T]>>(rows: &[R], x: i32, y: i32) -> Option<&T> {
+    let row = rows.get(usize::try_from(y).ok()?)?;
+    row.as_ref().get(usize::try_from(x).ok()?)
+}
+
+const P: f32 = 1. / 8.;
+
+fn edge_rect(dx: i32, dy: i32) -> (Vec2, Vec2) {
+    let pos = |d: i32| if d > 0 { 1. - P } else { 0. };
+    let len = |d: i32| if d != 0 { P } else { 1. };
+    (Vec2::new(pos(dx), pos(dy)), Vec2::new(len(dx), len(dy)))
+}
 
 impl Graphics {
     pub fn new(state: &mut State) -> Result<Graphics, String> {
@@ -201,18 +214,10 @@ impl Graphics {
                     let bx = if respect_position { piece.x as f32 } else { 0. } + j as f32;
                     let by = if respect_position { piece.y as f32 } else { 0. } + i as f32;
 
-                    let check = |dx: i32, dy: i32| {
-                        let row_idx = i as i32 + dy;
-                        let col_idx = j as i32 + dx;
-                        if row_idx < 0 || col_idx < 0 {
-                            false
-                        } else if row_idx as usize >= rotation.len()
-                            || col_idx as usize >= row.len()
-                        {
-                            false
-                        } else {
-                            rotation[row_idx as usize][col_idx as usize] != false
-                        }
+                    let check = |dx, dy| {
+                        at(rotation, j as i32 + dx, i as i32 + dy)
+                            .copied()
+                            .unwrap_or(false)
                     };
 
                     let up = check(0, -1);
@@ -264,17 +269,10 @@ impl Graphics {
                     let by = i as f32;
 
                     let fetch = |dx: i32, dy: i32| {
-                        let row_idx = i as i32 + dy;
-                        let col_idx = j as i32 + dx;
-                        if row_idx < 0 || col_idx < 0 {
-                            None
-                        } else if row_idx as usize >= WELL_ROWS || col_idx as usize >= WELL_COLS {
-                            None
-                        } else {
-                            well.blocks[row_idx as usize][col_idx as usize]
-                                .filter(|it| it.color == block.color)
-                                .map(|it| it.directions)
-                        }
+                        at(&well.blocks, j as i32 + dx, i as i32 + dy)
+                            .and_then(|b| b.as_ref())
+                            .filter(|b| b.color == block.color)
+                            .map(|b| b.directions)
                     };
 
                     let up = fetch(0, -1);
@@ -342,114 +340,23 @@ impl Graphics {
         for (i, row) in well.blocks.iter().enumerate() {
             for (j, col) in row.iter().enumerate() {
                 if col.is_some() {
-                    let bx = j as f32 * DST_BLOCK_SIZE;
-                    let by = i as f32 * DST_BLOCK_SIZE;
+                    let cell = Vec2::new(j as f32, i as f32);
 
-                    let check = |dx: i32, dy: i32| {
-                        let row_idx = i as i32 + dy;
-                        let col_idx = j as i32 + dx;
-                        if row_idx < 0 || col_idx < 0 {
-                            false
-                        } else if row_idx as usize >= WELL_ROWS || col_idx as usize >= WELL_COLS {
-                            false
-                        } else {
-                            well.blocks[row_idx as usize][col_idx as usize].is_none()
-                        }
+                    let check = |dx, dy| {
+                        matches!(at(&well.blocks, j as i32 + dx, i as i32 + dy), Some(None))
                     };
 
-                    let mut top = false;
-                    let mut left = false;
-                    let mut right = false;
-                    let mut bottom = false;
-
-                    if check(0, -1) {
-                        state.queue_draw(rectangle(
-                            Vec3::new(bx, by, 0.),
-                            DST_BLOCK_SIZE,
-                            DST_PIXEL_SIZE,
-                            Vec2::ZERO,
-                            Vec2::ONE,
-                            pixel_color,
-                        ));
-                        top = true;
+                    for (dx, dy) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
+                        if check(dx, dy) {
+                            let (off, size) = edge_rect(dx, dy);
+                            state.queue_draw(solid_rectangle(cell + off, size, pixel_color));
+                        }
                     }
-                    if check(0, 1) {
-                        state.queue_draw(rectangle(
-                            Vec3::new(bx, by + DST_BLOCK_SIZE - DST_PIXEL_SIZE, 0.),
-                            DST_BLOCK_SIZE,
-                            DST_PIXEL_SIZE,
-                            Vec2::ZERO,
-                            Vec2::ONE,
-                            pixel_color,
-                        ));
-                        bottom = true;
-                    }
-                    if check(-1, 0) {
-                        state.queue_draw(rectangle(
-                            Vec3::new(bx, by, 0.),
-                            DST_PIXEL_SIZE,
-                            DST_BLOCK_SIZE,
-                            Vec2::ZERO,
-                            Vec2::ONE,
-                            pixel_color,
-                        ));
-                        left = true;
-                    }
-                    if check(1, 0) {
-                        state.queue_draw(rectangle(
-                            Vec3::new(bx + DST_BLOCK_SIZE - DST_PIXEL_SIZE, by, 0.),
-                            DST_PIXEL_SIZE,
-                            DST_BLOCK_SIZE,
-                            Vec2::ZERO,
-                            Vec2::ONE,
-                            pixel_color,
-                        ));
-                        right = true;
-                    }
-
-                    if !left && !top && check(-1, -1) {
-                        state.queue_draw(rectangle(
-                            Vec3::new(bx, by, 0.),
-                            DST_PIXEL_SIZE,
-                            DST_PIXEL_SIZE,
-                            Vec2::ZERO,
-                            Vec2::ONE,
-                            pixel_color,
-                        ));
-                    }
-                    if !right && !top && check(1, -1) {
-                        state.queue_draw(rectangle(
-                            Vec3::new(bx + DST_BLOCK_SIZE - DST_PIXEL_SIZE, by, 0.),
-                            DST_PIXEL_SIZE,
-                            DST_PIXEL_SIZE,
-                            Vec2::ZERO,
-                            Vec2::ONE,
-                            pixel_color,
-                        ));
-                    }
-                    if !left && !bottom && check(-1, 1) {
-                        state.queue_draw(rectangle(
-                            Vec3::new(bx, by + DST_BLOCK_SIZE - DST_PIXEL_SIZE, 0.),
-                            DST_PIXEL_SIZE,
-                            DST_PIXEL_SIZE,
-                            Vec2::ZERO,
-                            Vec2::ONE,
-                            pixel_color,
-                        ));
-                    }
-                    if !right && !bottom && check(1, 1) {
-                        state.queue_draw(rectangle(
-                            Vec3::new(
-                                bx + DST_BLOCK_SIZE - DST_PIXEL_SIZE,
-                                by + DST_BLOCK_SIZE - DST_PIXEL_SIZE,
-                                0.,
-                            ),
-                            DST_PIXEL_SIZE,
-                            DST_PIXEL_SIZE,
-                            Vec2::ZERO,
-                            Vec2::ONE,
-                            pixel_color,
-                        ));
+                    for (dx, dy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                        if !check(dx, 0) && !check(0, dy) && check(dx, dy) {
+                            let (off, size) = edge_rect(dx, dy);
+                            state.queue_draw(solid_rectangle(cell + off, size, pixel_color));
+                        }
                     }
                 }
             }

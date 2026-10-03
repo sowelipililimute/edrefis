@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // use cgmath::{perspective, Deg, Matrix4, Point3, Rad, SquareMatrix, Vector2, Vector3, Vector4, Zero};
-use glam::{Mat4, Vec2, Vec3, Vec3Swizzles};
+use glam::{Mat4, Vec2, Vec2Swizzles, Vec3, Vec3Swizzles};
 use glyphon::fontdb;
 use std::{borrow::Cow, rc::Rc, sync::Arc};
 use wgpu::{UncapturedErrorHandler, util::DeviceExt};
@@ -152,6 +152,17 @@ pub fn rectangle(
         uv_position,
         uv_size.x * Vec2::X,
         uv_size.y * Vec2::Y,
+        color,
+    )
+}
+
+pub fn solid_rectangle(position: Vec2, size: Vec2, color: wgpu::Color) -> ([AVertex; 4], [u16; 6]) {
+    rectangle(
+        Vec3::new(position.x, position.y, 0.),
+        size.x,
+        size.y,
+        Vec2::ZERO,
+        Vec2::ONE,
         color,
     )
 }
@@ -634,10 +645,7 @@ impl State<'_> {
         self.vertices.extend_from_slice(&v);
     }
     pub fn set_texture(&mut self, texture: Option<&Texture>) {
-        self.active_bind_group = texture
-            .unwrap_or(&self.white_texture)
-            .bind_group
-            .clone();
+        self.active_bind_group = texture.unwrap_or(&self.white_texture).bind_group.clone();
     }
     pub fn set_camera(&mut self, camera: &dyn Camera) {
         self.camera_matrix = camera.matrix(&self.config);
