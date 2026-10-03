@@ -2,14 +2,13 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::gpu::{Camera2D, Camera3D, State, parallelogram, rectangle};
+use crate::gpu::{Camera2D, Camera3D, State, Texture, parallelogram, rectangle};
 use glam::{Vec2, Vec3};
 use logic::{
     field::level_to_gravity,
     piece::Piece,
     well::{Block, BlockDirections, WELL_COLS, WELL_ROWS, Well},
 };
-use std::rc::Rc;
 
 fn lerp(a: f32, b: f32, f: f32) -> f32 {
     a * (1.0 - f) + (b * f)
@@ -42,10 +41,10 @@ impl GridAtlas {
 const TILES_ATLAS: GridAtlas = GridAtlas { cols: 16, rows: 8 };
 
 pub struct Graphics {
-    tilemap: Rc<wgpu::BindGroup>,
-    backgrounds: Vec<Rc<wgpu::BindGroup>>,
-    well: (Rc<wgpu::BindGroup>, Rc<wgpu::TextureView>),
-    next: (Rc<wgpu::BindGroup>, Rc<wgpu::TextureView>),
+    tilemap: Texture,
+    backgrounds: Vec<Texture>,
+    well: Texture,
+    next: Texture,
     score_buffer: glyphon::Buffer,
 }
 
@@ -66,16 +65,16 @@ const BACKGROUNDS: &[&[u8]] = &[
 impl Graphics {
     pub fn new(state: &mut State) -> Result<Graphics, String> {
         let tilemap =
-            state.upload_texture(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Linear)?;
+            state.texture_from_png(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Linear)?;
 
-        let well = state.create_texture(WELL_COLS as u32 * 8, WELL_ROWS as u32 * 8);
-        let next = state.create_texture(4 * 8, 4 * 8);
+        let well = state.render_target(WELL_COLS as u32 * 8, WELL_ROWS as u32 * 8);
+        let next = state.render_target(4 * 8, 4 * 8);
         let mut buffer = state.create_buffer();
         Graphics::score_text(&mut buffer, state, 0, 0);
 
         let backgrounds = BACKGROUNDS
             .iter()
-            .map(|png| state.upload_texture(png, wgpu::FilterMode::Nearest))
+            .map(|png| state.texture_from_png(png, wgpu::FilterMode::Nearest))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Graphics {
@@ -247,7 +246,7 @@ impl Graphics {
         state.set_camera(&Camera2D::from_rect(
             Vec2::new(0., 0.),
             Vec2::new(WELL_COLS as f32, WELL_ROWS as f32),
-            Some(self.well.1.clone()),
+            Some(self.well.view.clone()),
         ));
         state.start_render_pass(Some(wgpu::Color {
             r: 0.,
@@ -256,7 +255,7 @@ impl Graphics {
             a: 0.,
         }))?;
 
-        state.set_texture(Some(self.tilemap.clone()));
+        state.set_texture(Some(&self.tilemap));
 
         for (i, row) in well.blocks.iter().enumerate() {
             for (j, col) in row.iter().enumerate() {
@@ -492,11 +491,11 @@ impl Graphics {
         state.set_camera(&Camera2D::from_rect(
             Vec2::new(0., 0.),
             Vec2::new(4., 4.),
-            Some(self.next.1.clone()),
+            Some(self.next.view.clone()),
         ));
 
         state.start_render_pass(Some(wgpu::Color::TRANSPARENT))?;
-        state.set_texture(Some(self.tilemap.clone()));
+        state.set_texture(Some(&self.tilemap));
         self.queue_piece(next, false, state);
         state.do_draw()?;
         state.complete_render_pass()?;
@@ -506,7 +505,7 @@ impl Graphics {
     pub fn render_background(&self, level: u32, state: &mut State) -> Result<(), String> {
         let bg = &self.backgrounds[(level / 100).min(self.backgrounds.len() as u32 - 1) as usize];
 
-        state.set_texture(Some(bg.clone()));
+        state.set_texture(Some(bg));
 
         state.queue_draw(rectangle(
             Vec3::ZERO,
@@ -547,7 +546,7 @@ impl Graphics {
         Graphics::queue_well_bg(state);
         state.do_draw()?;
 
-        state.set_texture(Some(self.well.0.clone()));
+        state.set_texture(Some(&self.well));
 
         let well_width = WELL_COLS as f32;
         let well_height = WELL_ROWS as f32;
@@ -563,7 +562,7 @@ impl Graphics {
 
         state.do_draw()?;
 
-        state.set_texture(Some(self.next.0.clone()));
+        state.set_texture(Some(&self.next));
         state.queue_draw(parallelogram(
             Vec3::new(4. / -2., 4. / -2. + well_height / 2. + 1.5, 0.),
             4. * Vec3::X,

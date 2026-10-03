@@ -68,6 +68,51 @@ impl MatrixUniform {
     }
 }
 
+pub struct Texture {
+    pub view: Rc<wgpu::TextureView>,
+    pub bind_group: Rc<wgpu::BindGroup>,
+}
+
+struct TextureDesc<'a> {
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    usage: wgpu::TextureUsages,
+    filter: wgpu::FilterMode,
+    pixels: Option<&'a [u8]>,
+}
+
+struct Samplers {
+    nearest: wgpu::Sampler,
+    linear: wgpu::Sampler,
+}
+
+impl Samplers {
+    fn new(device: &wgpu::Device) -> Samplers {
+        let make = |filter| {
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: filter,
+                min_filter: filter,
+                mipmap_filter: filter,
+                ..Default::default()
+            })
+        };
+        Samplers {
+            nearest: make(wgpu::FilterMode::Nearest),
+            linear: make(wgpu::FilterMode::Linear),
+        }
+    }
+    fn get(&self, filter: wgpu::FilterMode) -> &wgpu::Sampler {
+        match filter {
+            wgpu::FilterMode::Nearest => &self.nearest,
+            wgpu::FilterMode::Linear => &self.linear,
+        }
+    }
+}
+
 pub fn parallelogram(
     position: Vec3,
     edge1: Vec3,
@@ -207,7 +252,8 @@ pub struct State<'a> {
     render_pipeline: wgpu::RenderPipeline,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     matrix_bind_group_layout: wgpu::BindGroupLayout,
-    white_texture: Rc<wgpu::BindGroup>,
+    samplers: Samplers,
+    white_texture: Texture,
 
     active_render_pass: Option<(wgpu::CommandEncoder, wgpu::RenderPass<'static>)>,
 
@@ -377,12 +423,21 @@ impl State<'_> {
             cache: None,
         });
 
-        let white_texture = Rc::new(State::white_texture(
+        let samplers = Samplers::new(&device);
+        let white_texture = State::make_texture(
             &device,
             &queue,
             &texture_bind_group_layout,
-            texture_format,
-        ));
+            &samplers,
+            TextureDesc {
+                width: 1,
+                height: 1,
+                format: texture_format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                filter: wgpu::FilterMode::Nearest,
+                pixels: Some(&[255, 255, 255, 255]),
+            },
+        );
 
         // Set up text renderer
         let font_system = glyphon::FontSystem::new_with_fonts([
@@ -408,7 +463,7 @@ impl State<'_> {
             render_pipeline,
             texture_bind_group_layout,
             matrix_bind_group_layout,
-            white_texture: white_texture.clone(),
+            samplers,
 
             frame: None,
             frame_texture: None,
@@ -424,20 +479,22 @@ impl State<'_> {
 
             camera_matrix: Mat4::IDENTITY,
             camera_texture: None,
-            active_bind_group: white_texture,
+            active_bind_group: white_texture.bind_group.clone(),
+            white_texture,
             vertices: vec![],
             indices: vec![],
         })
     }
-    fn white_texture(
+    fn make_texture(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        texture_bind_group_layout: &wgpu::BindGroupLayout,
-        format: wgpu::TextureFormat,
-    ) -> wgpu::BindGroup {
+        layout: &wgpu::BindGroupLayout,
+        samplers: &Samplers,
+        desc: TextureDesc,
+    ) -> Texture {
         let size = wgpu::Extent3d {
-            width: 1,
-            height: 1,
+            width: desc.width,
+            height: desc.height,
             depth_or_array_layers: 1,
         };
 
@@ -446,113 +503,74 @@ impl State<'_> {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            label: Some("blocks"),
+            format: desc.format,
+            usage: desc.usage,
+            label: Some("texture"),
             view_formats: &[],
         });
 
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &[255, 255, 255, 255],
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4),
-                rows_per_image: Some(1),
-            },
-            size,
-        );
+        if let Some(pixels) = desc.pixels {
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                pixels,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(desc.width * 4),
+                    rows_per_image: Some(desc.height),
+                },
+                size,
+            );
+        }
 
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
-        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                    resource: wgpu::BindingResource::TextureView(&view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::Sampler(samplers.get(desc.filter)),
                 },
             ],
             label: Some("texture_bind_group"),
         });
 
-        texture_bind_group
+        Texture {
+            view: Rc::new(view),
+            bind_group: Rc::new(bind_group),
+        }
     }
-    pub fn create_texture(
-        &self,
-        width: u32,
-        height: u32,
-    ) -> (Rc<wgpu::BindGroup>, Rc<wgpu::TextureView>) {
-        let size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.texture_format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            label: Some("blocks"),
-            view_formats: &[],
-        });
-
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
-        let texture_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-            label: Some("texture_bind_group"),
-        });
-
-        (Rc::new(texture_bind_group), Rc::new(texture_view))
+    pub fn render_target(&self, width: u32, height: u32) -> Texture {
+        State::make_texture(
+            &self.device,
+            &self.queue,
+            &self.texture_bind_group_layout,
+            &self.samplers,
+            TextureDesc {
+                width,
+                height,
+                format: self.texture_format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                filter: wgpu::FilterMode::Nearest,
+                pixels: None,
+            },
+        )
     }
-    pub fn upload_texture(
+    pub fn texture_from_png(
         &self,
         png_bytes: &[u8],
         filter: wgpu::FilterMode,
-    ) -> Result<Rc<wgpu::BindGroup>, String> {
+    ) -> Result<Texture, String> {
         let header = minipng::decode_png_header(png_bytes)
             .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to decode PNG header: {}", e))?;
@@ -564,65 +582,20 @@ impl State<'_> {
             .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to convert PNG to rgba8bpc: {}", e))?;
 
-        let size = wgpu::Extent3d {
-            width: png.width(),
-            height: png.height(),
-            depth_or_array_layers: 1,
-        };
-
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            label: Some("blocks"),
-            view_formats: &[],
-        });
-        self.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
+        Ok(State::make_texture(
+            &self.device,
+            &self.queue,
+            &self.texture_bind_group_layout,
+            &self.samplers,
+            TextureDesc {
+                width: png.width(),
+                height: png.height(),
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                filter,
+                pixels: Some(png.pixels()),
             },
-            png.pixels(),
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(png.bytes_per_row() as u32),
-                rows_per_image: Some(png.height()),
-            },
-            size,
-        );
-
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: filter,
-            min_filter: filter,
-            mipmap_filter: filter,
-            ..Default::default()
-        });
-
-        let texture_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-            label: Some("texture_bind_group"),
-        });
-
-        Ok(Rc::new(texture_bind_group))
+        ))
     }
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
         self.config.width = width as u32;
@@ -660,8 +633,11 @@ impl State<'_> {
         self.indices.extend(i.iter().map(|x| *x + count));
         self.vertices.extend_from_slice(&v);
     }
-    pub fn set_texture(&mut self, texture: Option<Rc<wgpu::BindGroup>>) {
-        self.active_bind_group = texture.unwrap_or(self.white_texture.clone());
+    pub fn set_texture(&mut self, texture: Option<&Texture>) {
+        self.active_bind_group = texture
+            .unwrap_or(&self.white_texture)
+            .bind_group
+            .clone();
     }
     pub fn set_camera(&mut self, camera: &dyn Camera) {
         self.camera_matrix = camera.matrix(&self.config);
