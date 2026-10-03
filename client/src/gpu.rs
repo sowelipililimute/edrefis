@@ -97,8 +97,7 @@ pub fn rectangle(
     width: f32,
     height: f32,
     uv_position: Vec2,
-    uv_width: f32,
-    uv_height: f32,
+    uv_size: Vec2,
     color: wgpu::Color,
 ) -> ([AVertex; 4], [u16; 6]) {
     parallelogram(
@@ -106,8 +105,8 @@ pub fn rectangle(
         width * Vec3::X,
         height * Vec3::Y,
         uv_position,
-        uv_width * Vec2::X,
-        uv_height * Vec2::Y,
+        uv_size.x * Vec2::X,
+        uv_size.y * Vec2::Y,
         color,
     )
 }

@@ -2,12 +2,12 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::gpu::{parallelogram, rectangle, Camera2D, Camera3D, State};
+use crate::gpu::{Camera2D, Camera3D, State, parallelogram, rectangle};
 use glam::{Vec2, Vec3};
 use logic::{
     field::level_to_gravity,
     piece::Piece,
-    well::{Block, BlockDirections, Well, WELL_COLS, WELL_ROWS},
+    well::{Block, BlockDirections, WELL_COLS, WELL_ROWS, Well},
 };
 use std::rc::Rc;
 
@@ -27,45 +27,41 @@ fn texture_index(block: Block) -> i32 {
     }
 }
 
-// fn color(block: Block) -> wgpu::Color {
-//     match block {
-//     Block::Red => wgpu::Color { r: 1.0, g: 0.0, b: 0.18823529411764706, a: 1.0 },
-//     Block::Orange => wgpu::Color { r: 1.0, g: 0.4392156862745098, b: 0.0, a: 1.0 },
-//     Block::Yellow => wgpu::Color { r: 1.0, g: 0.7647058823529411, b: 0.0, a: 1.0 },
-//     Block::Green => wgpu::Color { r: 0.4588235294117647, g: 0.9333333333333333, b: 0.2235294117647059, a: 1.0 },
-//     Block::Cyan => wgpu::Color { r: 0.0, g: 0.9411764705882353, b: 0.8274509803921568, a: 1.0 },
-//     Block::Blue => wgpu::Color { r: 0.25098039215686274, g: 0.6235294117647059, b: 0.9725490196078431, a: 1.0 },
-//     Block::Purple => wgpu::Color { r: 0.7137254901960784, g: 0.47058823529411764, b: 0.9607843137254902, a: 1.0 },
-//     }
-// }
-
-fn tilemap_position(block: Block, directions: BlockDirections) -> Vec2 {
-    Vec2::new(
-        directions.bits() as f32 * TILEMAP_WIDTH,
-        texture_index(block) as f32 * 1. / 8.,
-    )
+struct GridAtlas {
+    cols: u32,
+    rows: u32,
 }
 
-const TILEMAP_WIDTH: f32 = 1. / 16.;
-const TILEMAP_HEIGHT: f32 = 1. / 8.;
+impl GridAtlas {
+    fn uv(&self, col: u32, row: u32) -> (Vec2, Vec2) {
+        let size = Vec2::new(1. / self.cols as f32, 1. / self.rows as f32);
+        (Vec2::new(col as f32, row as f32) * size, size)
+    }
+}
+
+const TILES_ATLAS: GridAtlas = GridAtlas { cols: 16, rows: 8 };
 
 pub struct Graphics {
     tilemap: Rc<wgpu::BindGroup>,
-    level000: Rc<wgpu::BindGroup>,
-    level100: Rc<wgpu::BindGroup>,
-    level200: Rc<wgpu::BindGroup>,
-    level300: Rc<wgpu::BindGroup>,
-    level400: Rc<wgpu::BindGroup>,
-    level500: Rc<wgpu::BindGroup>,
-    level600: Rc<wgpu::BindGroup>,
-    level700: Rc<wgpu::BindGroup>,
-    level800: Rc<wgpu::BindGroup>,
-    level900: Rc<wgpu::BindGroup>,
-    level1000: Rc<wgpu::BindGroup>,
+    backgrounds: Vec<Rc<wgpu::BindGroup>>,
     well: (Rc<wgpu::BindGroup>, Rc<wgpu::TextureView>),
     next: (Rc<wgpu::BindGroup>, Rc<wgpu::TextureView>),
     score_buffer: glyphon::Buffer,
 }
+
+const BACKGROUNDS: &[&[u8]] = &[
+    include_bytes!("gfx/level000.png"),
+    include_bytes!("gfx/level100.png"),
+    include_bytes!("gfx/level200.png"),
+    include_bytes!("gfx/level300.png"),
+    include_bytes!("gfx/level400.png"),
+    include_bytes!("gfx/level500.png"),
+    include_bytes!("gfx/level600.png"),
+    include_bytes!("gfx/level700.png"),
+    include_bytes!("gfx/level800.png"),
+    include_bytes!("gfx/level900.png"),
+    include_bytes!("gfx/level1000.png"),
+];
 
 impl Graphics {
     pub fn new(state: &mut State) -> Result<Graphics, String> {
@@ -77,55 +73,17 @@ impl Graphics {
         let mut buffer = state.create_buffer();
         Graphics::score_text(&mut buffer, state, 0, 0);
 
+        let backgrounds = BACKGROUNDS
+            .iter()
+            .map(|png| state.upload_texture(png, wgpu::FilterMode::Nearest))
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(Graphics {
             tilemap,
             well,
             next,
             score_buffer: buffer,
-            level000: state.upload_texture(
-                include_bytes!("gfx/level000.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level100: state.upload_texture(
-                include_bytes!("gfx/level100.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level200: state.upload_texture(
-                include_bytes!("gfx/level200.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level300: state.upload_texture(
-                include_bytes!("gfx/level300.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level400: state.upload_texture(
-                include_bytes!("gfx/level400.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level500: state.upload_texture(
-                include_bytes!("gfx/level500.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level600: state.upload_texture(
-                include_bytes!("gfx/level600.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level700: state.upload_texture(
-                include_bytes!("gfx/level700.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level800: state.upload_texture(
-                include_bytes!("gfx/level800.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level900: state.upload_texture(
-                include_bytes!("gfx/level900.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
-            level1000: state.upload_texture(
-                include_bytes!("gfx/level1000.png"),
-                wgpu::FilterMode::Nearest,
-            )?,
+            backgrounds,
         })
     }
     pub fn score_text(buffer: &mut glyphon::Buffer, state: &mut State, gravity: i32, level: u32) {
@@ -263,13 +221,17 @@ impl Graphics {
                     let left = check(-1, 0);
                     let right = check(1, 0);
 
+                    let (uv_pos, uv_size) = TILES_ATLAS.uv(
+                        BlockDirections::new(up, down, left, right).bits() as u32,
+                        texture_index(piece.color) as u32,
+                    );
+
                     state.queue_draw(rectangle(
                         Vec3::new(bx, by, 0.),
                         1.,
                         1.,
-                        tilemap_position(piece.color, BlockDirections::new(up, down, left, right)),
-                        TILEMAP_WIDTH,
-                        TILEMAP_HEIGHT,
+                        uv_pos,
+                        uv_size,
                         wgpu::Color::WHITE,
                     ));
                 }
@@ -321,16 +283,17 @@ impl Graphics {
                     let left = fetch(-1, 0);
                     let right = fetch(1, 0);
 
+                    let (uv_pos, uv_size) = TILES_ATLAS.uv(
+                        block.directions.match_with(up, down, left, right).bits() as u32,
+                        texture_index(block.color) as u32,
+                    );
+
                     state.queue_draw(rectangle(
                         Vec3::new(bx, by, 0.),
                         1.,
                         1.,
-                        tilemap_position(
-                            block.color,
-                            block.directions.match_with(up, down, left, right),
-                        ),
-                        TILEMAP_WIDTH,
-                        TILEMAP_HEIGHT,
+                        uv_pos,
+                        uv_size,
                         wgpu::Color::WHITE,
                     ));
                 }
@@ -355,9 +318,8 @@ impl Graphics {
                         Vec3::new(bx, by, 0.),
                         1.,
                         1.,
-                        Vec2::new(0., 0.),
-                        1.,
-                        1.,
+                        Vec2::ZERO,
+                        Vec2::ONE,
                         wgpu::Color {
                             r: 0.,
                             g: 0.,
@@ -407,8 +369,7 @@ impl Graphics {
                             DST_BLOCK_SIZE,
                             DST_PIXEL_SIZE,
                             Vec2::ZERO,
-                            1.,
-                            1.,
+                            Vec2::ONE,
                             pixel_color,
                         ));
                         top = true;
@@ -419,8 +380,7 @@ impl Graphics {
                             DST_BLOCK_SIZE,
                             DST_PIXEL_SIZE,
                             Vec2::ZERO,
-                            1.,
-                            1.,
+                            Vec2::ONE,
                             pixel_color,
                         ));
                         bottom = true;
@@ -431,8 +391,7 @@ impl Graphics {
                             DST_PIXEL_SIZE,
                             DST_BLOCK_SIZE,
                             Vec2::ZERO,
-                            1.,
-                            1.,
+                            Vec2::ONE,
                             pixel_color,
                         ));
                         left = true;
@@ -443,8 +402,7 @@ impl Graphics {
                             DST_PIXEL_SIZE,
                             DST_BLOCK_SIZE,
                             Vec2::ZERO,
-                            1.,
-                            1.,
+                            Vec2::ONE,
                             pixel_color,
                         ));
                         right = true;
@@ -456,8 +414,7 @@ impl Graphics {
                             DST_PIXEL_SIZE,
                             DST_PIXEL_SIZE,
                             Vec2::ZERO,
-                            1.,
-                            1.,
+                            Vec2::ONE,
                             pixel_color,
                         ));
                     }
@@ -467,8 +424,7 @@ impl Graphics {
                             DST_PIXEL_SIZE,
                             DST_PIXEL_SIZE,
                             Vec2::ZERO,
-                            1.,
-                            1.,
+                            Vec2::ONE,
                             pixel_color,
                         ));
                     }
@@ -478,8 +434,7 @@ impl Graphics {
                             DST_PIXEL_SIZE,
                             DST_PIXEL_SIZE,
                             Vec2::ZERO,
-                            1.,
-                            1.,
+                            Vec2::ONE,
                             pixel_color,
                         ));
                     }
@@ -493,8 +448,7 @@ impl Graphics {
                             DST_PIXEL_SIZE,
                             DST_PIXEL_SIZE,
                             Vec2::ZERO,
-                            1.,
-                            1.,
+                            Vec2::ONE,
                             pixel_color,
                         ));
                     }
@@ -516,9 +470,8 @@ impl Graphics {
                             Vec3::new(bx, by, 0.),
                             1.,
                             1.,
-                            Vec2::new(0., 0.),
-                            1.,
-                            1.,
+                            Vec2::ZERO,
+                            Vec2::ONE,
                             wgpu::Color {
                                 r: 0.,
                                 g: 0.,
@@ -551,29 +504,7 @@ impl Graphics {
         Ok(())
     }
     pub fn render_background(&self, level: u32, state: &mut State) -> Result<(), String> {
-        let bg = if level >= 1000 {
-            &self.level1000
-        } else if level >= 900 {
-            &self.level900
-        } else if level >= 800 {
-            &self.level800
-        } else if level >= 700 {
-            &self.level700
-        } else if level >= 600 {
-            &self.level600
-        } else if level >= 500 {
-            &self.level500
-        } else if level >= 400 {
-            &self.level400
-        } else if level >= 300 {
-            &self.level300
-        } else if level >= 200 {
-            &self.level200
-        } else if level >= 100 {
-            &self.level100
-        } else {
-            &self.level000
-        };
+        let bg = &self.backgrounds[(level / 100).min(self.backgrounds.len() as u32 - 1) as usize];
 
         state.set_texture(Some(bg.clone()));
 
@@ -582,8 +513,7 @@ impl Graphics {
             1.,
             1.,
             Vec2::ZERO,
-            1.,
-            1.,
+            Vec2::ONE,
             wgpu::Color::WHITE,
         ));
         state.do_draw()?;
