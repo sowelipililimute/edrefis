@@ -1,3 +1,4 @@
+pub mod buffer;
 pub mod camera;
 pub mod context;
 pub mod frame;

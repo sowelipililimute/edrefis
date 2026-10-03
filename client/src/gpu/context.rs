@@ -1,7 +1,7 @@
-use std::{borrow::Cow, rc::Rc};
+use std::{borrow::Cow, cell::RefCell, rc::Rc};
 use wgpu::UncapturedErrorHandler;
 
-use crate::gpu::{frame::Frame, geometry::AVertex};
+use crate::gpu::{buffer::GpuBuffers, frame::Frame, geometry::AVertex};
 
 struct Samplers {
     nearest: wgpu::Sampler,
@@ -62,6 +62,7 @@ pub struct Context<'surface> {
     pub white: Texture,
     pub layouts: Layouts,
     pub render_pipeline: wgpu::RenderPipeline,
+    pub buffers: RefCell<GpuBuffers>,
 
     surface: wgpu::Surface<'surface>,
     samplers: Samplers,
@@ -163,8 +164,8 @@ impl<'surface> Context<'surface> {
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(64),
                     },
                     count: None,
                 }],
@@ -235,18 +236,20 @@ impl<'surface> Context<'surface> {
             multiview: None,
             cache: None,
         });
+        let layouts = Layouts {
+            texture: texture_bind_group_layout,
+            camera: matrix_bind_group_layout,
+            standard: pipeline_layout,
+        };
 
         Ok(Context {
+            buffers: RefCell::new(GpuBuffers::new(&device, &layouts)),
             device,
             queue,
             format: texture_format,
             surface,
             config,
-            layouts: Layouts {
-                texture: texture_bind_group_layout,
-                camera: matrix_bind_group_layout,
-                standard: pipeline_layout,
-            },
+            layouts,
             samplers,
             white: white_texture,
             render_pipeline,
@@ -374,6 +377,11 @@ impl<'surface> Context<'surface> {
         Ok(())
     }
     pub fn frame<'context>(&'context self) -> Result<Frame<'context, 'surface>, String> {
+        let mut b = self.buffers.borrow_mut();
+        b.vertices.reset();
+        b.indices.reset();
+        b.uniforms.reset();
+
         let frame = self
             .surface
             .get_current_texture()

@@ -54,7 +54,7 @@ pub fn parallelogram(
     uv_edge1: Vec2,
     uv_edge2: Vec2,
     color: wgpu::Color,
-) -> ([AVertex; 4], [u16; 6]) {
+) -> ([AVertex; 4], [u32; 6]) {
     (
         [
             AVertex::new(position, color, uv_position),
@@ -77,7 +77,7 @@ pub fn rectangle(
     uv_position: Vec2,
     uv_size: Vec2,
     color: wgpu::Color,
-) -> ([AVertex; 4], [u16; 6]) {
+) -> ([AVertex; 4], [u32; 6]) {
     parallelogram(
         position,
         width * Vec3::X,
@@ -89,7 +89,7 @@ pub fn rectangle(
     )
 }
 
-pub fn solid_rectangle(position: Vec2, size: Vec2, color: wgpu::Color) -> ([AVertex; 4], [u16; 6]) {
+pub fn solid_rectangle(position: Vec2, size: Vec2, color: wgpu::Color) -> ([AVertex; 4], [u32; 6]) {
     rectangle(
         Vec3::new(position.x, position.y, 0.),
         size.x,

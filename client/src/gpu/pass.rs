@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles};
-use wgpu::util::DeviceExt;
 
 use crate::gpu::{
     camera::Camera,
@@ -28,7 +27,7 @@ pub struct Pass<'context, 'surface, 'frame> {
     pub ctx: &'context Context<'surface>,
 
     vertices: Vec<AVertex>,
-    indices: Vec<u16>,
+    indices: Vec<u32>,
     camera_matrix: Mat4,
     active_bind_group: Rc<wgpu::BindGroup>,
 }
@@ -47,9 +46,9 @@ impl<'context, 'surface, 'frame> Pass<'context, 'surface, 'frame> {
             active_bind_group: ctx.white.bind_group.clone(),
         }
     }
-    pub fn queue_draw<const V: usize, const I: usize>(&mut self, data: ([AVertex; V], [u16; I])) {
+    pub fn queue_draw<const V: usize, const I: usize>(&mut self, data: ([AVertex; V], [u32; I])) {
         let (v, i) = data;
-        let count = self.vertices.len() as u16;
+        let count = self.vertices.len() as u32;
         self.indices.extend(i.iter().map(|x| *x + count));
         self.vertices.extend_from_slice(&v);
     }
@@ -64,53 +63,47 @@ impl<'context, 'surface, 'frame> Pass<'context, 'surface, 'frame> {
             return Ok(());
         }
 
+        let mut buffers = self.ctx.buffers.borrow_mut();
+        buffers.vertices.reserve(
+            &self.ctx.device,
+            (self.vertices.len() * size_of::<AVertex>()) as u64,
+        );
+        buffers.indices.reserve(
+            &self.ctx.device,
+            (self.indices.len() * size_of::<u32>()) as u64,
+        );
+        buffers.reserve_uniforms(
+            &self.ctx.device,
+            &self.ctx.layouts,
+            size_of::<MatrixUniform>() as u64,
+        );
+
         let matrix = MatrixUniform::from(&self.camera_matrix);
 
-        let matrix_buffer = self
-            .ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Matrix Buffer"),
-                contents: bytemuck::cast_slice(&[matrix]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+        let (uniform_start, _) = buffers
+            .uniforms
+            .push(&self.ctx.queue, bytemuck::cast_slice(&[matrix]));
 
-        let matrix_bind_group = self
-            .ctx
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &self.ctx.layouts.camera,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: matrix_buffer.as_entire_binding(),
-                }],
-                label: Some("matrix_bind_group"),
-            });
+        let (vertex_start, vertex_end) = buffers
+            .vertices
+            .push(&self.ctx.queue, bytemuck::cast_slice(&self.vertices));
 
-        let vertex_buffer = self
-            .ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Well Vertex Buffer"),
-                contents: bytemuck::cast_slice(&self.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let index_buffer = self
-            .ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Well Index Buffer"),
-                contents: bytemuck::cast_slice(&self.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+        let (index_start, index_end) = buffers
+            .indices
+            .push(&self.ctx.queue, bytemuck::cast_slice(&self.indices));
+
         let num_indices = self.indices.len() as u32;
 
         self.pass
             .set_bind_group(0, self.active_bind_group.as_ref(), &[]);
-        self.pass.set_bind_group(1, &matrix_bind_group, &[]);
-        self.pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         self.pass
-            .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            .set_bind_group(1, &buffers.uniform_bind_group, &[uniform_start as u32]);
+        self.pass
+            .set_vertex_buffer(0, buffers.vertices.buffer.slice(vertex_start..vertex_end));
+        self.pass.set_index_buffer(
+            buffers.indices.buffer.slice(index_start..index_end),
+            wgpu::IndexFormat::Uint32,
+        );
         self.pass.draw_indexed(0..num_indices, 0, 0..1);
 
         self.vertices.clear();
