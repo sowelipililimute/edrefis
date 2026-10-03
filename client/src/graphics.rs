@@ -74,8 +74,28 @@ fn at<T, R: AsRef<[T]>>(rows: &[R], x: i32, y: i32) -> Option<&T> {
     row.as_ref().get(usize::try_from(x).ok()?)
 }
 
+const TILE_SIZE: u32 = 8;
 const P: f32 = 1. / 8.;
 const WALL_DEPTH: f32 = 2.;
+const WELL_BACKGROUND: wgpu::Color = wgpu::Color {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.4,
+};
+const WELL_WALLS: wgpu::Color = wgpu::Color {
+    r: 0.77625,
+    g: 0.96804,
+    b: 1.00513,
+    a: 0.1,
+};
+const TILE_SHADOW: wgpu::Color = wgpu::Color {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.5,
+};
+const NEXT_SIZE: u32 = 4;
 
 fn edge_rect(dx: i32, dy: i32) -> (Vec2, Vec2) {
     let pos = |d: i32| if d > 0 { 1. - P } else { 0. };
@@ -88,8 +108,8 @@ impl Graphics {
         let tilemap =
             ctx.texture_from_png(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Linear)?;
 
-        let well = ctx.render_target(WELL_COLS as u32 * 8, WELL_ROWS as u32 * 8);
-        let next = ctx.render_target(4 * 8, 4 * 8);
+        let well = ctx.render_target(WELL_COLS as u32 * TILE_SIZE, WELL_ROWS as u32 * TILE_SIZE);
+        let next = ctx.render_target(NEXT_SIZE * TILE_SIZE, NEXT_SIZE * TILE_SIZE);
         let mut buffer = text.create_buffer();
         Graphics::score_text(&mut buffer, text, 0, 0);
 
@@ -163,13 +183,6 @@ impl Graphics {
     pub fn queue_well_bg(pass: &mut Pass) {
         let well_width = WELL_COLS as f32;
         let well_height = WELL_ROWS as f32;
-        let wall = wgpu::Color {
-            r: 0.77625,
-            g: 0.96804,
-            b: 1.00513,
-            a: 0.1,
-        };
-
         let top_left = Vec3::new(well_width / -2., well_height / -2., WALL_DEPTH / 2.);
         let toward_camera = -WALL_DEPTH * Vec3::Z;
 
@@ -181,12 +194,7 @@ impl Graphics {
             Vec2::ZERO,
             Vec2::X,
             Vec2::Y,
-            wgpu::Color {
-                r: 0.,
-                g: 0.,
-                b: 0.,
-                a: 0.4,
-            },
+            WELL_BACKGROUND,
         ));
 
         // bottom
@@ -197,7 +205,7 @@ impl Graphics {
             Vec2::ZERO,
             Vec2::X,
             Vec2::Y,
-            wall,
+            WELL_WALLS,
         ));
 
         // left
@@ -208,7 +216,7 @@ impl Graphics {
             Vec2::ZERO,
             Vec2::X,
             Vec2::Y,
-            wall,
+            WELL_WALLS,
         ));
 
         // right
@@ -219,7 +227,7 @@ impl Graphics {
             Vec2::ZERO,
             Vec2::X,
             Vec2::Y,
-            wall,
+            WELL_WALLS,
         ));
     }
     pub fn queue_piece(&self, piece: &Piece, respect_position: bool, pass: &mut Pass) {
@@ -323,16 +331,7 @@ impl Graphics {
                     let bx = j as f32;
                     let by = i as f32;
 
-                    pass.queue_draw(solid_rectangle(
-                        Vec2::new(bx, by),
-                        Vec2::ONE,
-                        wgpu::Color {
-                            r: 0.,
-                            g: 0.,
-                            b: 0.,
-                            a: 0.5,
-                        },
-                    ));
+                    pass.queue_draw(solid_rectangle(Vec2::new(bx, by), Vec2::ONE, TILE_SHADOW));
                 }
             }
         }
