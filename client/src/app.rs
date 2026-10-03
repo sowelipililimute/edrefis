@@ -6,32 +6,41 @@ use logic::{
     well::Well,
 };
 
-use crate::{client::Client, gpu::State, graphics::Graphics, input::ClientInputs};
+use crate::{
+    client::Client,
+    gpu::{Context, TextRenderer},
+    graphics::Graphics,
+    input::ClientInputs,
+};
 
-pub struct App<'a> {
+pub struct App<'surface> {
     client: Client,
     field: Entity,
     ticks: u64,
     graphics: Graphics,
-    gpu: State<'a>,
+    gpu: Context<'surface>,
+    text: TextRenderer,
 }
 
-impl<'a> App<'a> {
-    pub fn new(graphics: Graphics, gpu: State<'a>) -> App<'a> {
+impl<'surface> App<'surface> {
+    pub fn new(gpu: Context<'surface>) -> Result<App<'surface>, String> {
         let mut client = Client::new();
         let field = spawn_field(&mut client.world);
+        let mut text = TextRenderer::new(&gpu);
+        let graphics = Graphics::new(&gpu, &mut text)?;
 
-        App {
+        Ok(App {
             client,
             field,
             ticks: 0,
             graphics,
             gpu,
-        }
+            text,
+        })
     }
 
     pub fn tick(
-        self: &mut App<'a>,
+        self: &mut App<'surface>,
         inputs: &mut dyn ClientInputs,
         sounds: &mut dyn Sounds,
         cubes: &mut dyn Cubes,
@@ -41,26 +50,35 @@ impl<'a> App<'a> {
         field_system(&mut self.client.world, self.ticks, sounds, cubes);
     }
 
-    pub fn render_world(self: &mut App<'a>) -> Result<(), String> {
+    pub fn render_world(self: &mut App<'surface>) -> Result<(), String> {
+        let mut frame = self.gpu.frame()?;
+
         for (well, level, state, next) in self
             .client
             .world
             .query_mut::<(&Well, &u32, &GameState, &Piece)>()
         {
             match state {
-                GameState::ActivePiece { piece, .. } => {
-                    self.graphics
-                        .render(*level, well, Some(piece), next, &mut self.gpu)?
-                }
+                GameState::ActivePiece { piece, .. } => self.graphics.render(
+                    *level,
+                    well,
+                    Some(piece),
+                    next,
+                    &mut frame,
+                    &mut self.text,
+                )?,
                 _ => self
                     .graphics
-                    .render(*level, well, None, next, &mut self.gpu)?,
+                    .render(*level, well, None, next, &mut frame, &mut self.text)?,
             }
+            break;
         }
+
+        frame.present();
         Ok(())
     }
 
-    pub fn resize(self: &mut App<'a>, width: u32, height: u32) -> Result<(), String> {
+    pub fn resize(self: &mut App<'surface>, width: u32, height: u32) -> Result<(), String> {
         self.gpu.resize(width, height)
     }
 }

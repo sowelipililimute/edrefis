@@ -4,7 +4,7 @@
 
 use std::panic::{self, PanicHookInfo};
 
-use client::{app::App, gpu::State, graphics::Graphics, input::KeyboardInputs};
+use client::{app::App, gpu::Context, input::KeyboardInputs};
 use logic::{hooks::NoopHooks, input::Input};
 use wasm_bindgen::prelude::wasm_bindgen;
 use web_sys::{HtmlCanvasElement, console};
@@ -32,7 +32,7 @@ fn input_to_web_code(key: Input) -> &'static str {
 
 impl WebApp {
     pub async fn new(canvas: HtmlCanvasElement) -> Result<WebApp, String> {
-        let mut gpu = State::new(
+        let gpu = Context::new(
             canvas.width(),
             canvas.height(),
             |instance| {
@@ -48,10 +48,8 @@ impl WebApp {
         )
         .await
         .map_err(|e| format!("failed to set up gpu: {}", e))?;
-        let graphics =
-            Graphics::new(&mut gpu).map_err(|e| format!("failed to load graphics: {}", e))?;
 
-        let app = App::new(graphics, gpu);
+        let app = App::new(gpu).map_err(|e| format!("failed to load app: {e}"))?;
 
         Ok(WebApp {
             app,

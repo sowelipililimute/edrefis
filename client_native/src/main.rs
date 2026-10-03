@@ -47,7 +47,7 @@ pub fn main() -> Result<(), String> {
 
     let (width, height) = window.size();
 
-    let mut gpu_state = pollster::block_on(gpu::State::new(
+    let gpu_state = pollster::block_on(gpu::Context::new(
         width,
         height,
         |instance| unsafe {
@@ -57,9 +57,8 @@ pub fn main() -> Result<(), String> {
         },
         Box::new(|error| eprintln!("Unhandled GPU error {error}")),
     ))?;
-    let graphics = Graphics::new(&mut gpu_state)?;
 
-    let mut app = App::new(graphics, gpu_state);
+    let mut app = App::new(gpu_state)?;
     let mut input_provider = KeyboardInputs::new(input_to_sdl_key);
 
     let mut event_pump = ctx.event_pump().map_err(|e| e.to_string())?;

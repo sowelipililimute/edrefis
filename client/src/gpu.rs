@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-// use cgmath::{perspective, Deg, Matrix4, Point3, Rad, SquareMatrix, Vector2, Vector3, Vector4, Zero};
-use glam::{Mat4, Vec2, Vec2Swizzles, Vec3, Vec3Swizzles};
+use glam::{Mat4, Vec2, Vec3, Vec3Swizzles};
 use glyphon::fontdb;
 use std::{borrow::Cow, rc::Rc, sync::Arc};
 use wgpu::{UncapturedErrorHandler, util::DeviceExt};
@@ -169,7 +168,6 @@ pub fn solid_rectangle(position: Vec2, size: Vec2, color: wgpu::Color) -> ([AVer
 
 pub trait Camera {
     fn matrix(&self, screen: &wgpu::SurfaceConfiguration) -> Mat4;
-    fn texture(&self) -> Option<Rc<wgpu::TextureView>>;
 }
 
 #[derive(Debug)]
@@ -178,7 +176,6 @@ pub struct Camera2D {
     pub zoom: Vec2,
     pub target: Vec2,
     pub offset: Vec2,
-    pub texture: Option<Rc<wgpu::TextureView>>,
 }
 
 #[derive(Debug)]
@@ -187,15 +184,10 @@ pub struct Camera3D {
     pub target: Vec3,
     pub up: Vec3,
     pub fov_y: f32,
-    pub texture: Option<Rc<wgpu::TextureView>>,
 }
 
 impl Camera2D {
-    pub fn from_rect(
-        position: Vec2,
-        size: Vec2,
-        texture: Option<Rc<wgpu::TextureView>>,
-    ) -> Camera2D {
+    pub fn from_rect(position: Vec2, size: Vec2) -> Camera2D {
         let target = position + (size / 2.);
 
         Camera2D {
@@ -203,7 +195,6 @@ impl Camera2D {
             zoom: Vec2::new(1. / size.x * 2., -1. / size.y * 2.),
             offset: Vec2::ZERO,
             rotation: 0.,
-            texture,
         }
     }
 }
@@ -213,15 +204,10 @@ impl Camera for Camera2D {
         let mat_origin = Mat4::from_translation(Vec3::new(-self.target.x, -self.target.y, 0.0));
         let mat_rotation = Mat4::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), self.rotation);
 
-        let y_invert = if self.texture.is_some() { -1.0 } else { 1.0 };
-
-        let mat_scale = Mat4::from_scale(Vec3::new(self.zoom.x, self.zoom.y * y_invert, 1.0));
+        let mat_scale = Mat4::from_scale(Vec3::new(self.zoom.x, self.zoom.y, 1.0));
         let mat_translation = Mat4::from_translation(Vec3::new(self.offset.x, self.offset.y, 0.0));
 
         mat_translation * ((mat_scale * mat_rotation) * mat_origin)
-    }
-    fn texture(&self) -> Option<Rc<wgpu::TextureView>> {
-        self.texture.clone()
     }
 }
 
@@ -234,9 +220,6 @@ impl Camera for Camera3D {
 
         return proj * view;
     }
-    fn texture(&self) -> Option<Rc<wgpu::TextureView>> {
-        self.texture.clone()
-    }
 }
 
 impl Default for Camera3D {
@@ -246,48 +229,36 @@ impl Default for Camera3D {
             target: Vec3::new(0., 0., 0.),
             up: Vec3::Y,
             fov_y: 45.0_f32.to_radians(),
-            texture: None,
         }
     }
 }
 
-pub struct State<'a> {
-    frame_texture: Option<Rc<wgpu::TextureView>>,
-    frame: Option<wgpu::SurfaceTexture>,
-    texture_format: wgpu::TextureFormat,
-
-    surface: wgpu::Surface<'a>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    render_pipeline: wgpu::RenderPipeline,
-    texture_bind_group_layout: wgpu::BindGroupLayout,
-    matrix_bind_group_layout: wgpu::BindGroupLayout,
-    samplers: Samplers,
-    white_texture: Texture,
-
-    active_render_pass: Option<(wgpu::CommandEncoder, wgpu::RenderPass<'static>)>,
-
-    font_system: glyphon::FontSystem,
-    swash_cache: glyphon::SwashCache,
-    viewport: glyphon::Viewport,
-    atlas: glyphon::TextAtlas,
-    text_renderer: glyphon::TextRenderer,
-
-    camera_matrix: Mat4,
-    camera_texture: Option<Rc<wgpu::TextureView>>,
-    active_bind_group: Rc<wgpu::BindGroup>,
-    vertices: Vec<AVertex>,
-    indices: Vec<u16>,
+struct Layouts {
+    texture: wgpu::BindGroupLayout,
+    camera: wgpu::BindGroupLayout,
+    standard: wgpu::PipelineLayout,
 }
 
-impl State<'_> {
-    pub async fn new<'a, F: FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'a>, String>>(
+pub struct Context<'surface> {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub format: wgpu::TextureFormat,
+
+    surface: wgpu::Surface<'surface>,
+    config: wgpu::SurfaceConfiguration,
+    layouts: Layouts,
+    samplers: Samplers,
+    white: Texture,
+    render_pipeline: wgpu::RenderPipeline,
+}
+
+impl<'surface> Context<'surface> {
+    pub async fn new<F: FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'surface>, String>>(
         width: u32,
         height: u32,
         maker: F,
         error_handler: Box<dyn UncapturedErrorHandler>,
-    ) -> Result<State<'a>, String> {
+    ) -> Result<Context<'surface>, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY | wgpu::Backends::SECONDARY,
             dx12_shader_compiler: Default::default(),
@@ -391,6 +362,22 @@ impl State<'_> {
             push_constant_ranges: &[],
         });
 
+        let samplers = Samplers::new(&device);
+        let white_texture = Context::make_texture(
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+            &samplers,
+            TextureDesc {
+                width: 1,
+                height: 1,
+                format: texture_format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                filter: wgpu::FilterMode::Nearest,
+                pixels: Some(&[255, 255, 255, 255]),
+            },
+        );
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("ashader.wgsl"))),
@@ -434,68 +421,23 @@ impl State<'_> {
             cache: None,
         });
 
-        let samplers = Samplers::new(&device);
-        let white_texture = State::make_texture(
-            &device,
-            &queue,
-            &texture_bind_group_layout,
-            &samplers,
-            TextureDesc {
-                width: 1,
-                height: 1,
-                format: texture_format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                filter: wgpu::FilterMode::Nearest,
-                pixels: Some(&[255, 255, 255, 255]),
-            },
-        );
-
-        // Set up text renderer
-        let font_system = glyphon::FontSystem::new_with_fonts([
-            fontdb::Source::Binary(Arc::new(include_bytes!("font/HankenGrotesk-Bold.ttf"))),
-            fontdb::Source::Binary(Arc::new(include_bytes!("font/HankenGrotesk-Medium.ttf"))),
-        ]);
-        let swash_cache = glyphon::SwashCache::new();
-        let cache = glyphon::Cache::new(&device);
-        let viewport = glyphon::Viewport::new(&device, &cache);
-        let mut atlas = glyphon::TextAtlas::new(&device, &queue, &cache, texture_format);
-        let text_renderer = glyphon::TextRenderer::new(
-            &mut atlas,
-            &device,
-            wgpu::MultisampleState::default(),
-            None,
-        );
-
-        Ok(State {
-            surface,
+        Ok(Context {
             device,
             queue,
+            format: texture_format,
+            surface,
             config,
-            render_pipeline,
-            texture_bind_group_layout,
-            matrix_bind_group_layout,
+            layouts: Layouts {
+                texture: texture_bind_group_layout,
+                camera: matrix_bind_group_layout,
+                standard: pipeline_layout,
+            },
             samplers,
-
-            frame: None,
-            frame_texture: None,
-            texture_format,
-
-            active_render_pass: None,
-
-            font_system,
-            swash_cache,
-            viewport,
-            atlas,
-            text_renderer,
-
-            camera_matrix: Mat4::IDENTITY,
-            camera_texture: None,
-            active_bind_group: white_texture.bind_group.clone(),
-            white_texture,
-            vertices: vec![],
-            indices: vec![],
+            white: white_texture,
+            render_pipeline,
         })
     }
+
     fn make_texture(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -560,15 +502,15 @@ impl State<'_> {
         }
     }
     pub fn render_target(&self, width: u32, height: u32) -> Texture {
-        State::make_texture(
+        Context::make_texture(
             &self.device,
             &self.queue,
-            &self.texture_bind_group_layout,
+            &self.layouts.texture,
             &self.samplers,
             TextureDesc {
                 width,
                 height,
-                format: self.texture_format,
+                format: self.format,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::COPY_DST
                     | wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -593,10 +535,10 @@ impl State<'_> {
             .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to convert PNG to rgba8bpc: {}", e))?;
 
-        Ok(State::make_texture(
+        Ok(Context::make_texture(
             &self.device,
             &self.queue,
-            &self.texture_bind_group_layout,
+            &self.layouts.texture,
             &self.samplers,
             TextureDesc {
                 width: png.width(),
@@ -612,99 +554,123 @@ impl State<'_> {
         self.config.width = width as u32;
         self.config.height = height as u32;
 
-        self.frame_texture = None;
-        self.frame = None;
-
         self.surface.configure(&self.device, &self.config);
 
         Ok(())
     }
-    fn get_frame_view(&mut self) -> Result<Rc<wgpu::TextureView>, String> {
-        if let Some(view) = &self.frame_texture {
-            return Ok(view.clone());
-        }
-
+    pub fn frame<'context>(&'context self) -> Result<Frame<'context, 'surface>, String> {
         let frame = self
             .surface
             .get_current_texture()
             .map_err(|e| format!("failed to get current texture of surface: {}", e))?;
-        let view = Rc::new(frame.texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(self.texture_format),
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.format),
             ..Default::default()
-        }));
+        });
 
-        self.frame = Some(frame);
-        self.frame_texture = Some(view.clone());
+        let encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("main_command_encoder"),
+            });
 
-        Ok(view)
+        Ok(Frame {
+            ctx: self,
+            surface: frame,
+            view,
+            encoder,
+        })
     }
+}
+
+pub enum RenderTarget<'context> {
+    Screen,
+    Texture(&'context Texture),
+}
+
+pub struct Frame<'context, 'surface> {
+    ctx: &'context Context<'surface>,
+    surface: wgpu::SurfaceTexture,
+    view: wgpu::TextureView,
+    encoder: wgpu::CommandEncoder,
+}
+
+impl<'context, 'surface> Frame<'context, 'surface> {
+    pub fn pass<'frame>(
+        &'frame mut self,
+        target: RenderTarget,
+        clear: Option<wgpu::Color>,
+    ) -> Pass<'context, 'surface, 'frame> {
+        let target_view: &wgpu::TextureView = match target {
+            RenderTarget::Texture(texture) => texture.view.as_ref(),
+            RenderTarget::Screen => &self.view,
+        };
+
+        let mut pass = self.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: clear.map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            label: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        pass.set_pipeline(&self.ctx.render_pipeline);
+        Pass {
+            pass,
+            ctx: self.ctx,
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            camera_matrix: Mat4::IDENTITY,
+            active_bind_group: self.ctx.white.bind_group.clone(),
+        }
+    }
+    pub fn present(self) {
+        self.ctx
+            .queue
+            .submit(std::iter::once(self.encoder.finish()));
+        self.surface.present();
+    }
+}
+
+pub struct Pass<'context, 'surface, 'frame> {
+    pass: wgpu::RenderPass<'frame>,
+    ctx: &'context Context<'surface>,
+
+    vertices: Vec<AVertex>,
+    indices: Vec<u16>,
+    camera_matrix: Mat4,
+    active_bind_group: Rc<wgpu::BindGroup>,
+}
+
+impl<'context, 'surface, 'frame> Pass<'context, 'surface, 'frame> {
     pub fn queue_draw<const V: usize, const I: usize>(&mut self, data: ([AVertex; V], [u16; I])) {
         let (v, i) = data;
         let count = self.vertices.len() as u16;
         self.indices.extend(i.iter().map(|x| *x + count));
         self.vertices.extend_from_slice(&v);
     }
-    pub fn set_texture(&mut self, texture: Option<&Texture>) {
-        self.active_bind_group = texture.unwrap_or(&self.white_texture).bind_group.clone();
-    }
     pub fn set_camera(&mut self, camera: &dyn Camera) {
-        self.camera_matrix = camera.matrix(&self.config);
-        self.camera_texture = camera.texture();
+        self.camera_matrix = camera.matrix(&self.ctx.config);
     }
-    pub fn start_render_pass(&mut self, clear: Option<wgpu::Color>) -> Result<(), String> {
-        let target = match &self.camera_texture {
-            Some(texture) => texture.clone(),
-            None => self.get_frame_view()?,
-        };
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("main_command_encoder"),
-            });
-
-        let mut pass = encoder
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: clear.map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                label: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            })
-            .forget_lifetime();
-        pass.set_pipeline(&self.render_pipeline);
-
-        self.active_render_pass = Some((encoder, pass));
-
-        Ok(())
-    }
-    pub fn complete_render_pass(&mut self) -> Result<(), String> {
-        let (encoder, render_pass) = std::mem::replace(&mut self.active_render_pass, None)
-            .ok_or("tried to complete a render pass without one being active")?;
-
-        drop(render_pass);
-        self.queue.submit(std::iter::once(encoder.finish()));
-        Ok(())
+    pub fn set_texture(&mut self, texture: Option<&Texture>) {
+        self.active_bind_group = texture.unwrap_or(&self.ctx.white).bind_group.clone();
     }
     pub fn do_draw(&mut self) -> Result<(), String> {
         if self.vertices.is_empty() {
             return Ok(());
         }
-        let (_, render_pass) = self
-            .active_render_pass
-            .as_mut()
-            .ok_or("tried to draw without a render pass being active")?;
 
         let matrix = MatrixUniform::from(&self.camera_matrix);
 
         let matrix_buffer = self
+            .ctx
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Matrix Buffer"),
@@ -712,16 +678,20 @@ impl State<'_> {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
-        let matrix_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.matrix_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: matrix_buffer.as_entire_binding(),
-            }],
-            label: Some("matrix_bind_group"),
-        });
+        let matrix_bind_group = self
+            .ctx
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &self.ctx.layouts.camera,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: matrix_buffer.as_entire_binding(),
+                }],
+                label: Some("matrix_bind_group"),
+            });
 
         let vertex_buffer = self
+            .ctx
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Well Vertex Buffer"),
@@ -729,6 +699,7 @@ impl State<'_> {
                 usage: wgpu::BufferUsages::VERTEX,
             });
         let index_buffer = self
+            .ctx
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Well Index Buffer"),
@@ -737,17 +708,55 @@ impl State<'_> {
             });
         let num_indices = self.indices.len() as u32;
 
-        render_pass.set_bind_group(0, self.active_bind_group.as_ref(), &[]);
-        render_pass.set_bind_group(1, &matrix_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        render_pass.draw_indexed(0..num_indices, 0, 0..1);
+        self.pass
+            .set_bind_group(0, self.active_bind_group.as_ref(), &[]);
+        self.pass.set_bind_group(1, &matrix_bind_group, &[]);
+        self.pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        self.pass
+            .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        self.pass.draw_indexed(0..num_indices, 0, 0..1);
 
         self.vertices.clear();
         self.indices.clear();
 
         Ok(())
     }
+}
+
+pub struct TextRenderer {
+    font_system: glyphon::FontSystem,
+    swash_cache: glyphon::SwashCache,
+    viewport: glyphon::Viewport,
+    atlas: glyphon::TextAtlas,
+    text_renderer: glyphon::TextRenderer,
+}
+
+impl TextRenderer {
+    pub fn new(ctx: &Context) -> TextRenderer {
+        let font_system = glyphon::FontSystem::new_with_fonts([
+            fontdb::Source::Binary(Arc::new(include_bytes!("font/HankenGrotesk-Bold.ttf"))),
+            fontdb::Source::Binary(Arc::new(include_bytes!("font/HankenGrotesk-Medium.ttf"))),
+        ]);
+        let swash_cache = glyphon::SwashCache::new();
+        let cache = glyphon::Cache::new(&ctx.device);
+        let viewport = glyphon::Viewport::new(&ctx.device, &cache);
+        let mut atlas = glyphon::TextAtlas::new(&ctx.device, &ctx.queue, &cache, ctx.format);
+        let text_renderer = glyphon::TextRenderer::new(
+            &mut atlas,
+            &ctx.device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
+
+        TextRenderer {
+            font_system,
+            swash_cache,
+            viewport,
+            atlas,
+            text_renderer,
+        }
+    }
+
     pub fn create_buffer(&mut self) -> glyphon::Buffer {
         let mut text_buffer =
             glyphon::Buffer::new(&mut self.font_system, glyphon::Metrics::new(30.0, 42.0));
@@ -772,25 +781,30 @@ impl State<'_> {
         );
         buffer.shape_until_scroll(&mut self.font_system, false);
     }
-    pub fn world_to_view(&self, point: Vec3) -> Vec2 {
-        let transformed = (self.camera_matrix.project_point3(point).xy() / Vec2::new(2., -2.))
+    pub fn world_to_view(&self, pass: &Pass, point: Vec3) -> Vec2 {
+        let transformed = pass.camera_matrix.project_point3(point).xy() / Vec2::new(2., -2.)
             + Vec2::new(0.5, 0.5);
-        let screen_size = Vec2::new(self.config.width as f32, self.config.height as f32);
+        let screen_size = Vec2::new(pass.ctx.config.width as f32, pass.ctx.config.height as f32);
 
         transformed * screen_size
     }
-    pub fn draw_text(&mut self, buffer: &mut glyphon::Buffer, point: Vec2) -> Result<(), String> {
+    pub fn draw_text(
+        &mut self,
+        pass: &mut Pass,
+        buffer: &mut glyphon::Buffer,
+        point: Vec2,
+    ) -> Result<(), String> {
         self.viewport.update(
-            &self.queue,
+            &pass.ctx.queue,
             glyphon::Resolution {
-                width: self.config.width,
-                height: self.config.height,
+                width: pass.ctx.config.width,
+                height: pass.ctx.config.height,
             },
         );
         self.text_renderer
             .prepare(
-                &mut self.device,
-                &mut self.queue,
+                &pass.ctx.device,
+                &pass.ctx.queue,
                 &mut self.font_system,
                 &mut self.atlas,
                 &mut self.viewport,
@@ -802,8 +816,8 @@ impl State<'_> {
                     bounds: glyphon::TextBounds {
                         left: 0,
                         top: 0,
-                        right: self.config.width as i32,
-                        bottom: self.config.height as i32,
+                        right: pass.ctx.config.width as i32,
+                        bottom: pass.ctx.config.height as i32,
                     },
                     default_color: glyphon::Color::rgb(255, 255, 255),
                     custom_glyphs: &[],
@@ -813,26 +827,10 @@ impl State<'_> {
             .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to prepare a text render: {}", e))?;
 
-        let (_, render_pass) = self
-            .active_render_pass
-            .as_mut()
-            .ok_or("tried to draw without a render pass being active")?;
-
         self.text_renderer
-            .render(&self.atlas, &self.viewport, render_pass)
+            .render(&self.atlas, &self.viewport, &mut pass.pass)
             .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to complete a text render: {}", e))?;
-
-        Ok(())
-    }
-    pub fn present(&mut self) -> Result<(), String> {
-        self.frame_texture = None;
-        let frame = self
-            .frame
-            .take()
-            .ok_or("tried to present without a frame being acquired")?;
-
-        frame.present();
 
         Ok(())
     }

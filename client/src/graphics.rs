@@ -2,7 +2,10 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::gpu::{Camera2D, Camera3D, State, Texture, parallelogram, rectangle, solid_rectangle};
+use crate::gpu::{
+    Camera2D, Camera3D, Context, Frame, Pass, RenderTarget, TextRenderer, Texture, parallelogram,
+    rectangle, solid_rectangle,
+};
 use glam::{Vec2, Vec3};
 use logic::{
     field::level_to_gravity,
@@ -76,18 +79,18 @@ fn edge_rect(dx: i32, dy: i32) -> (Vec2, Vec2) {
 }
 
 impl Graphics {
-    pub fn new(state: &mut State) -> Result<Graphics, String> {
+    pub fn new(ctx: &Context, text: &mut TextRenderer) -> Result<Graphics, String> {
         let tilemap =
-            state.texture_from_png(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Linear)?;
+            ctx.texture_from_png(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Linear)?;
 
-        let well = state.render_target(WELL_COLS as u32 * 8, WELL_ROWS as u32 * 8);
-        let next = state.render_target(4 * 8, 4 * 8);
-        let mut buffer = state.create_buffer();
-        Graphics::score_text(&mut buffer, state, 0, 0);
+        let well = ctx.render_target(WELL_COLS as u32 * 8, WELL_ROWS as u32 * 8);
+        let next = ctx.render_target(4 * 8, 4 * 8);
+        let mut buffer = text.create_buffer();
+        Graphics::score_text(&mut buffer, text, 0, 0);
 
         let backgrounds = BACKGROUNDS
             .iter()
-            .map(|png| state.texture_from_png(png, wgpu::FilterMode::Nearest))
+            .map(|png| ctx.texture_from_png(png, wgpu::FilterMode::Nearest))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Graphics {
@@ -98,7 +101,12 @@ impl Graphics {
             backgrounds,
         })
     }
-    pub fn score_text(buffer: &mut glyphon::Buffer, state: &mut State, gravity: i32, level: u32) {
+    pub fn score_text(
+        buffer: &mut glyphon::Buffer,
+        text: &mut TextRenderer,
+        gravity: i32,
+        level: u32,
+    ) {
         let attrs = glyphon::Attrs::new()
             .family(glyphon::Family::Name("Hanken Grotesk"))
             .weight(glyphon::Weight::MEDIUM)
@@ -107,7 +115,7 @@ impl Graphics {
         let is_20g = gravity >= 256;
         let gravity_amount = if !is_20g { gravity / 2 } else { gravity / 256 };
 
-        state.set_buffer_text(
+        text.set_buffer_text(
             buffer,
             [
                 (
@@ -147,7 +155,7 @@ impl Graphics {
             attrs,
         );
     }
-    pub fn queue_well_bg(state: &mut State) {
+    pub fn queue_well_bg(pass: &mut Pass) {
         let well_width = WELL_COLS as f32;
         let well_height = WELL_ROWS as f32;
         let wall = wgpu::Color {
@@ -158,7 +166,7 @@ impl Graphics {
         };
 
         // well bg
-        state.queue_draw(parallelogram(
+        pass.queue_draw(parallelogram(
             Vec3::new(well_width / -2., well_height / -2., -1.),
             well_width * Vec3::X,
             well_height * Vec3::Y,
@@ -174,7 +182,7 @@ impl Graphics {
         ));
 
         // bottom
-        state.queue_draw(parallelogram(
+        pass.queue_draw(parallelogram(
             Vec3::new(well_width / -2., well_height / -2., -1.),
             well_width * Vec3::X,
             2. * Vec3::Z,
@@ -185,7 +193,7 @@ impl Graphics {
         ));
 
         // left
-        state.queue_draw(parallelogram(
+        pass.queue_draw(parallelogram(
             Vec3::new(well_width / -2., well_height / -2., -1.),
             well_height * Vec3::Y,
             2. * Vec3::Z,
@@ -196,7 +204,7 @@ impl Graphics {
         ));
 
         // right
-        state.queue_draw(parallelogram(
+        pass.queue_draw(parallelogram(
             Vec3::new(well_width / 2., well_height / -2., -1.),
             well_height * Vec3::Y,
             2. * Vec3::Z,
@@ -206,7 +214,7 @@ impl Graphics {
             wall,
         ));
     }
-    pub fn queue_piece(&self, piece: &Piece, respect_position: bool, state: &mut State) {
+    pub fn queue_piece(&self, piece: &Piece, respect_position: bool, pass: &mut Pass) {
         let rotation = piece.rotations.piece_map()[piece.rotation];
         for (i, row) in rotation.iter().enumerate() {
             for (j, col) in row.iter().enumerate() {
@@ -230,7 +238,7 @@ impl Graphics {
                         texture_index(piece.color) as u32,
                     );
 
-                    state.queue_draw(rectangle(
+                    pass.queue_draw(rectangle(
                         Vec3::new(bx, by, 0.),
                         1.,
                         1.,
@@ -246,21 +254,17 @@ impl Graphics {
         &self,
         well: &Well,
         piece: Option<&Piece>,
-        state: &mut State,
+        frame: &mut Frame,
     ) -> Result<(), String> {
-        state.set_camera(&Camera2D::from_rect(
+        let mut pass = frame.pass(
+            RenderTarget::Texture(&self.well),
+            Some(wgpu::Color::TRANSPARENT),
+        );
+        pass.set_camera(&Camera2D::from_rect(
             Vec2::new(0., 0.),
             Vec2::new(WELL_COLS as f32, WELL_ROWS as f32),
-            Some(self.well.view.clone()),
         ));
-        state.start_render_pass(Some(wgpu::Color {
-            r: 0.,
-            g: 0.,
-            b: 0.,
-            a: 0.,
-        }))?;
-
-        state.set_texture(Some(&self.tilemap));
+        pass.set_texture(Some(&self.tilemap));
 
         for (i, row) in well.blocks.iter().enumerate() {
             for (j, col) in row.iter().enumerate() {
@@ -285,7 +289,7 @@ impl Graphics {
                         texture_index(block.color) as u32,
                     );
 
-                    state.queue_draw(rectangle(
+                    pass.queue_draw(rectangle(
                         Vec3::new(bx, by, 0.),
                         1.,
                         1.,
@@ -298,12 +302,12 @@ impl Graphics {
         }
 
         if let Some(piece) = piece {
-            self.queue_piece(piece, true, state);
+            self.queue_piece(piece, true, &mut pass);
         }
 
-        state.do_draw()?;
+        pass.do_draw()?;
 
-        state.set_texture(None);
+        pass.set_texture(None);
 
         for (i, row) in well.blocks.iter().enumerate() {
             for (j, col) in row.iter().enumerate() {
@@ -311,7 +315,7 @@ impl Graphics {
                     let bx = j as f32;
                     let by = i as f32;
 
-                    state.queue_draw(solid_rectangle(
+                    pass.queue_draw(solid_rectangle(
                         Vec2::new(bx, by),
                         Vec2::ONE,
                         wgpu::Color {
@@ -344,13 +348,13 @@ impl Graphics {
                     for (dx, dy) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
                         if check(dx, dy) {
                             let (off, size) = edge_rect(dx, dy);
-                            state.queue_draw(solid_rectangle(cell + off, size, pixel_color));
+                            pass.queue_draw(solid_rectangle(cell + off, size, pixel_color));
                         }
                     }
                     for (dx, dy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
                         if !check(dx, 0) && !check(0, dy) && check(dx, dy) {
                             let (off, size) = edge_rect(dx, dy);
-                            state.queue_draw(solid_rectangle(cell + off, size, pixel_color));
+                            pass.queue_draw(solid_rectangle(cell + off, size, pixel_color));
                         }
                     }
                 }
@@ -367,7 +371,7 @@ impl Graphics {
                         let bx = piece.x as f32 + j as f32;
                         let by = piece.y as f32 + i as f32;
 
-                        state.queue_draw(rectangle(
+                        pass.queue_draw(rectangle(
                             Vec3::new(bx, by, 0.),
                             1.,
                             1.,
@@ -384,32 +388,29 @@ impl Graphics {
                 }
             }
         }
-        state.do_draw()?;
-        state.complete_render_pass()?;
+        pass.do_draw()?;
 
         Ok(())
     }
-    pub fn render_next(&mut self, next: &Piece, state: &mut State) -> Result<(), String> {
-        state.set_camera(&Camera2D::from_rect(
-            Vec2::new(0., 0.),
-            Vec2::new(4., 4.),
-            Some(self.next.view.clone()),
-        ));
+    pub fn render_next(&mut self, next: &Piece, frame: &mut Frame) -> Result<(), String> {
+        let mut pass = frame.pass(
+            RenderTarget::Texture(&self.next),
+            Some(wgpu::Color::TRANSPARENT),
+        );
+        pass.set_camera(&Camera2D::from_rect(Vec2::new(0., 0.), Vec2::new(4., 4.)));
+        pass.set_texture(Some(&self.tilemap));
 
-        state.start_render_pass(Some(wgpu::Color::TRANSPARENT))?;
-        state.set_texture(Some(&self.tilemap));
-        self.queue_piece(next, false, state);
-        state.do_draw()?;
-        state.complete_render_pass()?;
+        self.queue_piece(next, false, &mut pass);
+        pass.do_draw()?;
 
         Ok(())
     }
-    pub fn render_background(&self, level: u32, state: &mut State) -> Result<(), String> {
+    pub fn render_background(&self, level: u32, pass: &mut Pass) -> Result<(), String> {
         let bg = &self.backgrounds[(level / 100).min(self.backgrounds.len() as u32 - 1) as usize];
 
-        state.set_texture(Some(bg));
+        pass.set_texture(Some(bg));
 
-        state.queue_draw(rectangle(
+        pass.queue_draw(rectangle(
             Vec3::ZERO,
             1.,
             1.,
@@ -417,7 +418,7 @@ impl Graphics {
             Vec2::ONE,
             wgpu::Color::WHITE,
         ));
-        state.do_draw()?;
+        pass.do_draw()?;
 
         Ok(())
     }
@@ -427,32 +428,28 @@ impl Graphics {
         well: &Well,
         piece: Option<&Piece>,
         next: &Piece,
-        state: &mut State,
+        frame: &mut Frame,
+        text: &mut TextRenderer,
     ) -> Result<(), String> {
-        self.render_well(well, piece, state)?;
-        self.render_next(next, state)?;
+        self.render_well(well, piece, frame)?;
+        self.render_next(next, frame)?;
 
-        state.set_camera(&Camera2D::from_rect(Vec2::ZERO, Vec2::new(1., 1.), None));
-        state.start_render_pass(Some(wgpu::Color {
-            r: 0.05,
-            g: 0.05,
-            b: 0.1,
-            a: 1.0,
-        }))?;
-        self.render_background(level, state)?;
+        let mut pass = frame.pass(RenderTarget::Screen, Some(wgpu::Color::BLACK));
 
-        state.set_camera(&Camera3D::default());
+        pass.set_camera(&Camera2D::from_rect(Vec2::ZERO, Vec2::new(1., 1.)));
+        self.render_background(level, &mut pass)?;
 
-        state.set_texture(None);
+        pass.set_camera(&Camera3D::default());
+        pass.set_texture(None);
 
-        Graphics::queue_well_bg(state);
-        state.do_draw()?;
+        Graphics::queue_well_bg(&mut pass);
+        pass.do_draw()?;
 
-        state.set_texture(Some(&self.well));
+        pass.set_texture(Some(&self.well));
 
         let well_width = WELL_COLS as f32;
         let well_height = WELL_ROWS as f32;
-        state.queue_draw(parallelogram(
+        pass.queue_draw(parallelogram(
             Vec3::new(well_width / -2., well_height / -2., 0.),
             well_width * Vec3::X,
             well_height * Vec3::Y,
@@ -462,10 +459,10 @@ impl Graphics {
             wgpu::Color::WHITE,
         ));
 
-        state.do_draw()?;
+        pass.do_draw()?;
 
-        state.set_texture(Some(&self.next));
-        state.queue_draw(parallelogram(
+        pass.set_texture(Some(&self.next));
+        pass.queue_draw(parallelogram(
             Vec3::new(4. / -2., 4. / -2. + well_height / 2. + 1.5, 0.),
             4. * Vec3::X,
             4. * Vec3::Y,
@@ -474,20 +471,14 @@ impl Graphics {
             Vec2::Y,
             wgpu::Color::WHITE,
         ));
-        state.do_draw()?;
+        pass.do_draw()?;
 
-        let point = state.world_to_view(Vec3::new(well_width / 2. + 1., well_height / 2., 0.));
-        Graphics::score_text(
-            &mut self.score_buffer,
-            state,
-            level_to_gravity(level),
-            level,
+        let point = text.world_to_view(
+            &mut pass,
+            Vec3::new(well_width / 2. + 1., well_height / 2., 0.),
         );
-        state.draw_text(&mut self.score_buffer, point)?;
-
-        state.complete_render_pass()?;
-
-        state.present()?;
+        Graphics::score_text(&mut self.score_buffer, text, level_to_gravity(level), level);
+        text.draw_text(&mut pass, &mut self.score_buffer, point)?;
 
         Ok(())
     }
