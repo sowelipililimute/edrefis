@@ -78,7 +78,7 @@ const WELL_BACKGROUND: wgpu::Color = wgpu::Color {
     r: 0.,
     g: 0.,
     b: 0.,
-    a: 0.4,
+    a: 0.8,
 };
 const TILE_SHADOW: wgpu::Color = wgpu::Color {
     r: 0.,
