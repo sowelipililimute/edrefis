@@ -67,6 +67,7 @@ impl TextRenderer {
         pass: &mut Pass,
         buffer: &mut glyphon::Buffer,
         point: Vec2,
+        scale: f32,
     ) -> Result<(), String> {
         self.viewport.update(
             &pass.ctx.queue,
@@ -86,7 +87,7 @@ impl TextRenderer {
                     buffer,
                     left: point.x,
                     top: point.y,
-                    scale: 1.0,
+                    scale,
                     bounds: glyphon::TextBounds {
                         left: 0,
                         top: 0,

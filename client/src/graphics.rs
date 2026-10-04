@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::gpu::{
-    camera::{Camera2D, Camera3D},
+    camera::{Camera2D, TileCamera},
     context::{Context, Texture},
     frame::{Frame, RenderTarget},
-    geometry::{parallelogram, rectangle, solid_rectangle},
+    geometry::{rectangle, solid_rectangle},
     pass::Pass,
     text::TextRenderer,
 };
@@ -50,8 +50,7 @@ const TILES_ATLAS: GridAtlas = GridAtlas { cols: 16, rows: 8 };
 pub struct Graphics {
     tilemap: Texture,
     backgrounds: Vec<Texture>,
-    well: Texture,
-    next: Texture,
+    frame: Texture,
     score_buffer: glyphon::Buffer,
 }
 
@@ -74,20 +73,12 @@ fn at<T, R: AsRef<[T]>>(rows: &[R], x: i32, y: i32) -> Option<&T> {
     row.as_ref().get(usize::try_from(x).ok()?)
 }
 
-const TILE_SIZE: u32 = 8;
 const P: f32 = 1. / 8.;
-const WALL_DEPTH: f32 = 2.;
 const WELL_BACKGROUND: wgpu::Color = wgpu::Color {
     r: 0.,
     g: 0.,
     b: 0.,
     a: 0.4,
-};
-const WELL_WALLS: wgpu::Color = wgpu::Color {
-    r: 0.77625,
-    g: 0.96804,
-    b: 1.00513,
-    a: 0.1,
 };
 const TILE_SHADOW: wgpu::Color = wgpu::Color {
     r: 0.,
@@ -95,7 +86,19 @@ const TILE_SHADOW: wgpu::Color = wgpu::Color {
     b: 0.,
     a: 0.5,
 };
-const NEXT_SIZE: u32 = 4;
+const VIEW_HEIGHT_TILES: f32 = 32.;
+const TEXT_TILE_PX: f32 = 20.;
+const VISIBLE_ROWS: f32 = WELL_ROWS as f32 - 1.;
+const FRAME_SIZE: Vec2 = Vec2::new(WELL_COLS as f32 + 2., VISIBLE_ROWS + 2.);
+const WELL_ORIGIN: Vec2 = Vec2::new(WELL_COLS as f32 / -2., VISIBLE_ROWS / -2. - 1.);
+const NEXT_ORIGIN: Vec2 = Vec2::new(-2., FRAME_SIZE.y / -2. - 5.);
+
+fn tile_camera(origin: Vec2) -> TileCamera {
+    TileCamera {
+        height_tiles: VIEW_HEIGHT_TILES,
+        origin,
+    }
+}
 
 fn edge_rect(dx: i32, dy: i32) -> (Vec2, Vec2) {
     let pos = |d: i32| if d > 0 { 1. - P } else { 0. };
@@ -106,22 +109,21 @@ fn edge_rect(dx: i32, dy: i32) -> (Vec2, Vec2) {
 impl Graphics {
     pub fn new(ctx: &Context, text: &mut TextRenderer) -> Result<Graphics, String> {
         let tilemap =
-            ctx.texture_from_png(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Linear)?;
+            ctx.texture_from_png(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Nearest)?;
 
-        let well = ctx.render_target(WELL_COLS as u32 * TILE_SIZE, WELL_ROWS as u32 * TILE_SIZE);
-        let next = ctx.render_target(NEXT_SIZE * TILE_SIZE, NEXT_SIZE * TILE_SIZE);
+        let frame =
+            ctx.texture_from_png(include_bytes!("gfx/frame.png"), wgpu::FilterMode::Nearest)?;
         let mut buffer = text.create_buffer();
         Graphics::score_text(&mut buffer, text, 0, 0);
 
         let backgrounds = BACKGROUNDS
             .iter()
-            .map(|png| ctx.texture_from_png(png, wgpu::FilterMode::Nearest))
+            .map(|png| ctx.texture_from_png(png, wgpu::FilterMode::Linear))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Graphics {
             tilemap,
-            well,
-            next,
+            frame,
             score_buffer: buffer,
             backgrounds,
         })
@@ -181,53 +183,10 @@ impl Graphics {
         );
     }
     pub fn queue_well_bg(pass: &mut Pass) {
-        let well_width = WELL_COLS as f32;
-        let well_height = WELL_ROWS as f32;
-        let top_left = Vec3::new(well_width / -2., well_height / -2., WALL_DEPTH / 2.);
-        let toward_camera = -WALL_DEPTH * Vec3::Z;
-
-        // well bg
-        pass.draw(&parallelogram(
-            top_left,
-            well_width * Vec3::X,
-            well_height * Vec3::Y,
-            Vec2::ZERO,
-            Vec2::X,
-            Vec2::Y,
+        pass.draw(&solid_rectangle(
+            WELL_ORIGIN + Vec2::Y,
+            Vec2::new(WELL_COLS as f32, VISIBLE_ROWS),
             WELL_BACKGROUND,
-        ));
-
-        // bottom
-        pass.draw(&parallelogram(
-            top_left + well_height * Vec3::Y,
-            well_width * Vec3::X,
-            toward_camera,
-            Vec2::ZERO,
-            Vec2::X,
-            Vec2::Y,
-            WELL_WALLS,
-        ));
-
-        // left
-        pass.draw(&parallelogram(
-            top_left,
-            well_height * Vec3::Y,
-            toward_camera,
-            Vec2::ZERO,
-            Vec2::X,
-            Vec2::Y,
-            WELL_WALLS,
-        ));
-
-        // right
-        pass.draw(&parallelogram(
-            top_left + well_width * Vec3::X,
-            well_height * Vec3::Y,
-            toward_camera,
-            Vec2::ZERO,
-            Vec2::X,
-            Vec2::Y,
-            WELL_WALLS,
         ));
     }
     pub fn queue_piece(&self, piece: &Piece, respect_position: bool, pass: &mut Pass) {
@@ -270,16 +229,9 @@ impl Graphics {
         &self,
         well: &Well,
         piece: Option<&Piece>,
-        frame: &mut Frame,
+        pass: &mut Pass,
     ) -> Result<(), String> {
-        let mut pass = frame.pass(
-            RenderTarget::Texture(&self.well),
-            Some(wgpu::Color::TRANSPARENT),
-        );
-        pass.set_camera(&Camera2D::from_rect(
-            Vec2::new(0., 0.),
-            Vec2::new(WELL_COLS as f32, WELL_ROWS as f32),
-        ));
+        pass.set_camera(&tile_camera(WELL_ORIGIN));
         pass.set_texture(Some(&self.tilemap));
 
         for (i, row) in well.blocks.iter().enumerate() {
@@ -318,7 +270,7 @@ impl Graphics {
         }
 
         if let Some(piece) = piece {
-            self.queue_piece(piece, true, &mut pass);
+            self.queue_piece(piece, true, pass);
         }
 
         pass.set_texture(None);
@@ -396,15 +348,11 @@ impl Graphics {
 
         Ok(())
     }
-    pub fn render_next(&mut self, next: &Piece, frame: &mut Frame) -> Result<(), String> {
-        let mut pass = frame.pass(
-            RenderTarget::Texture(&self.next),
-            Some(wgpu::Color::TRANSPARENT),
-        );
-        pass.set_camera(&Camera2D::from_rect(Vec2::new(0., 0.), Vec2::new(4., 4.)));
+    pub fn render_next(&self, next: &Piece, pass: &mut Pass) -> Result<(), String> {
+        pass.set_camera(&tile_camera(NEXT_ORIGIN));
         pass.set_texture(Some(&self.tilemap));
 
-        self.queue_piece(next, false, &mut pass);
+        self.queue_piece(next, false, pass);
 
         Ok(())
     }
@@ -433,47 +381,38 @@ impl Graphics {
         frame: &mut Frame,
         text: &mut TextRenderer,
     ) -> Result<(), String> {
-        self.render_well(well, piece, frame)?;
-        self.render_next(next, frame)?;
-
         let mut pass = frame.pass(RenderTarget::Screen, Some(wgpu::Color::BLACK));
 
         pass.set_camera(&Camera2D::from_rect(Vec2::ZERO, Vec2::new(1., 1.)));
         self.render_background(level, &mut pass)?;
 
-        pass.set_camera(&Camera3D::default());
+        pass.set_camera(&tile_camera(Vec2::ZERO));
         pass.set_texture(None);
 
         Graphics::queue_well_bg(&mut pass);
 
-        pass.set_texture(Some(&self.well));
+        self.render_well(well, piece, &mut pass)?;
 
-        let well_width = WELL_COLS as f32;
-        let well_height = WELL_ROWS as f32;
-        pass.draw(&parallelogram(
-            Vec3::new(well_width / -2., well_height / -2., 0.),
-            well_width * Vec3::X,
-            well_height * Vec3::Y,
+        pass.set_camera(&tile_camera(Vec2::ZERO));
+        pass.set_texture(Some(&self.frame));
+        pass.draw(&rectangle(
+            (FRAME_SIZE / -2.).extend(0.),
+            FRAME_SIZE.x,
+            FRAME_SIZE.y,
             Vec2::ZERO,
-            Vec2::X,
-            Vec2::Y,
+            Vec2::ONE,
             wgpu::Color::WHITE,
         ));
 
-        pass.set_texture(Some(&self.next));
-        pass.draw(&parallelogram(
-            Vec3::new(4. / -2., well_height / -2. - 3.5, 0.),
-            4. * Vec3::X,
-            4. * Vec3::Y,
-            Vec2::ZERO,
-            Vec2::X,
-            Vec2::Y,
-            wgpu::Color::WHITE,
-        ));
+        self.render_next(next, &mut pass)?;
 
-        let point = pass.world_to_view(Vec3::new(well_width / 2. + 1., well_height / -2., 0.));
+        pass.set_camera(&tile_camera(Vec2::ZERO));
+        let point = pass
+            .world_to_view((FRAME_SIZE * Vec2::new(0.5, -0.5) + Vec2::X).extend(0.))
+            .round();
         Graphics::score_text(&mut self.score_buffer, text, level_to_gravity(level), level);
-        text.draw_text(&mut pass, &mut self.score_buffer, point)?;
+        let scale = tile_camera(Vec2::ZERO).tile_px(&pass.ctx.config) / TEXT_TILE_PX;
+        text.draw_text(&mut pass, &mut self.score_buffer, point, scale)?;
 
         Ok(())
     }

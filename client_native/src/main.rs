@@ -39,11 +39,12 @@ pub fn main() -> Result<(), String> {
         .window("Edrefis", WELL_COLS as u32 * 60, WELL_COLS as u32 * 60)
         .position_centered()
         .resizable()
+        .high_pixel_density()
         .metal_view()
         .build()
         .map_err(|e| e.to_string())?;
 
-    let (width, height) = window.size();
+    let (width, height) = window.size_in_pixels();
 
     let gpu_state = pollster::block_on(gpu::context::Context::new(
         width,
