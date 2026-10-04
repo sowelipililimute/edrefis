@@ -1,11 +1,12 @@
 use std::rc::Rc;
 
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles};
+use wgpu::util::align_to;
 
 use crate::gpu::{
     camera::Camera,
     context::{Context, Texture},
-    geometry::AVertex,
+    geometry::{AVertex, Mesh},
 };
 
 #[repr(C)]
@@ -23,13 +24,24 @@ impl MatrixUniform {
 }
 
 pub struct Pass<'context, 'surface, 'frame> {
-    pub pass: wgpu::RenderPass<'frame>,
+    pass: wgpu::RenderPass<'frame>,
     pub ctx: &'context Context<'surface>,
+
+    current_texture: Rc<wgpu::BindGroup>,
+    current_camera_matrix: Mat4,
 
     vertices: Vec<AVertex>,
     indices: Vec<u32>,
+    batches: Vec<Batch>,
+}
+
+struct Batch {
+    texture: Rc<wgpu::BindGroup>,
     camera_matrix: Mat4,
-    active_bind_group: Rc<wgpu::BindGroup>,
+    vertex_start: usize,
+    vertex_len: usize,
+    index_start: usize,
+    index_len: usize,
 }
 
 impl<'context, 'surface, 'frame> Pass<'context, 'surface, 'frame> {
@@ -40,28 +52,64 @@ impl<'context, 'surface, 'frame> Pass<'context, 'surface, 'frame> {
         Pass {
             pass,
             ctx,
+            current_camera_matrix: Mat4::IDENTITY,
+            current_texture: ctx.white.bind_group.clone(),
             vertices: Vec::new(),
             indices: Vec::new(),
-            camera_matrix: Mat4::IDENTITY,
-            active_bind_group: ctx.white.bind_group.clone(),
+            batches: Vec::new(),
         }
-    }
-    pub fn queue_draw<const V: usize, const I: usize>(&mut self, data: ([AVertex; V], [u32; I])) {
-        let (v, i) = data;
-        let count = self.vertices.len() as u32;
-        self.indices.extend(i.iter().map(|x| *x + count));
-        self.vertices.extend_from_slice(&v);
     }
     pub fn set_camera(&mut self, camera: &dyn Camera) {
-        self.camera_matrix = camera.matrix(&self.ctx.config);
+        self.current_camera_matrix = camera.matrix(&self.ctx.config);
     }
     pub fn set_texture(&mut self, texture: Option<&Texture>) {
-        self.active_bind_group = texture.unwrap_or(&self.ctx.white).bind_group.clone();
+        self.current_texture = texture.unwrap_or(&self.ctx.white).bind_group.clone();
     }
-    pub fn do_draw(&mut self) -> Result<(), String> {
-        if self.vertices.is_empty() {
-            return Ok(());
+    fn batch_dirty(&mut self) -> bool {
+        if let Some(it) = self.batches.last() {
+            if !Rc::ptr_eq(&self.current_texture, &it.texture) {
+                return true;
+            }
+            if it.camera_matrix != self.current_camera_matrix {
+                return true;
+            }
+
+            return false;
         }
+
+        return true;
+    }
+    fn push_batch(&mut self) {
+        self.batches.push(Batch {
+            texture: self.current_texture.clone(),
+            camera_matrix: self.current_camera_matrix,
+            vertex_start: self.vertices.len(),
+            vertex_len: 0,
+            index_start: self.indices.len(),
+            index_len: 0,
+        });
+    }
+    pub fn draw(&mut self, data: &dyn Mesh) {
+        let v = data.vertices();
+        let i = data.indices();
+        if self.batch_dirty() {
+            self.push_batch();
+        }
+        let batch = self.batches.last_mut().unwrap();
+
+        self.vertices.extend(v);
+        self.indices
+            .extend(i.iter().map(|x| *x + batch.vertex_len as u32));
+
+        batch.vertex_len += v.len();
+        batch.index_len += i.len();
+    }
+    pub fn flush(&mut self) {
+        if self.batches.is_empty() {
+            return;
+        }
+
+        self.pass.set_pipeline(&self.ctx.render_pipeline);
 
         let mut buffers = self.ctx.buffers.borrow_mut();
         buffers.vertices.reserve(
@@ -75,48 +123,71 @@ impl<'context, 'surface, 'frame> Pass<'context, 'surface, 'frame> {
         buffers.reserve_uniforms(
             &self.ctx.device,
             &self.ctx.layouts,
-            size_of::<MatrixUniform>() as u64,
+            (self.batches.len()
+                * align_to(
+                    size_of::<MatrixUniform>(),
+                    self.ctx.device.limits().min_uniform_buffer_offset_alignment as usize,
+                )) as u64,
         );
 
-        let matrix = MatrixUniform::from(&self.camera_matrix);
-
-        let (uniform_start, _) = buffers
-            .uniforms
-            .push(&self.ctx.queue, bytemuck::cast_slice(&[matrix]));
-
-        let (vertex_start, vertex_end) = buffers
+        let (vertex_start, _) = buffers
             .vertices
             .push(&self.ctx.queue, bytemuck::cast_slice(&self.vertices));
 
-        let (index_start, index_end) = buffers
+        let (index_start, _) = buffers
             .indices
             .push(&self.ctx.queue, bytemuck::cast_slice(&self.indices));
 
-        let num_indices = self.indices.len() as u32;
+        for batch in self.batches.iter() {
+            let matrix = MatrixUniform::from(&batch.camera_matrix);
 
-        self.pass
-            .set_bind_group(0, self.active_bind_group.as_ref(), &[]);
-        self.pass
-            .set_bind_group(1, &buffers.uniform_bind_group, &[uniform_start as u32]);
-        self.pass
-            .set_vertex_buffer(0, buffers.vertices.buffer.slice(vertex_start..vertex_end));
-        self.pass.set_index_buffer(
-            buffers.indices.buffer.slice(index_start..index_end),
-            wgpu::IndexFormat::Uint32,
-        );
-        self.pass.draw_indexed(0..num_indices, 0, 0..1);
+            let (uniform_start, _) = buffers
+                .uniforms
+                .push(&self.ctx.queue, bytemuck::cast_slice(&[matrix]));
+
+            let vertex_slice = {
+                let v0 = vertex_start as usize + batch.vertex_start * size_of::<AVertex>();
+                let v1 = v0 + batch.vertex_len * size_of::<AVertex>();
+
+                buffers.vertices.buffer.slice(v0 as u64..v1 as u64)
+            };
+            let index_slice = {
+                let i0 = index_start as usize + batch.index_start * size_of::<u32>();
+                let i1 = i0 + batch.index_len * size_of::<u32>();
+
+                buffers.indices.buffer.slice(i0 as u64..i1 as u64)
+            };
+
+            self.pass.set_bind_group(0, batch.texture.as_ref(), &[]);
+            self.pass
+                .set_bind_group(1, &buffers.uniform_bind_group, &[uniform_start as u32]);
+
+            self.pass.set_vertex_buffer(0, vertex_slice);
+            self.pass
+                .set_index_buffer(index_slice, wgpu::IndexFormat::Uint32);
+            self.pass.draw_indexed(0..batch.index_len as u32, 0, 0..1);
+        }
 
         self.vertices.clear();
         self.indices.clear();
-
-        Ok(())
+        self.batches.clear();
     }
-
     pub fn world_to_view(&self, point: Vec3) -> Vec2 {
-        let transformed = self.camera_matrix.project_point3(point).xy() / Vec2::new(2., -2.)
+        let transformed = self.current_camera_matrix.project_point3(point).xy()
+            / Vec2::new(2., -2.)
             + Vec2::new(0.5, 0.5);
         let screen_size = Vec2::new(self.ctx.config.width as f32, self.ctx.config.height as f32);
 
         transformed * screen_size
+    }
+    pub fn raw(&mut self) -> &mut wgpu::RenderPass<'frame> {
+        self.flush();
+        &mut self.pass
+    }
+}
+
+impl<'context, 'surface, 'frame> Drop for Pass<'context, 'surface, 'frame> {
+    fn drop(&mut self) {
+        self.flush();
     }
 }

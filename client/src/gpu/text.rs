@@ -102,7 +102,7 @@ impl TextRenderer {
             .map_err(|e| format!("failed to prepare a text render: {}", e))?;
 
         self.text_renderer
-            .render(&self.atlas, &self.viewport, &mut pass.pass)
+            .render(&self.atlas, &self.viewport, pass.raw())
             .map_err(|e| e.to_string())
             .map_err(|e| format!("failed to complete a text render: {}", e))?;
 

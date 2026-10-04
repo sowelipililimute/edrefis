@@ -187,7 +187,7 @@ impl Graphics {
         let toward_camera = -WALL_DEPTH * Vec3::Z;
 
         // well bg
-        pass.queue_draw(parallelogram(
+        pass.draw(&parallelogram(
             top_left,
             well_width * Vec3::X,
             well_height * Vec3::Y,
@@ -198,7 +198,7 @@ impl Graphics {
         ));
 
         // bottom
-        pass.queue_draw(parallelogram(
+        pass.draw(&parallelogram(
             top_left + well_height * Vec3::Y,
             well_width * Vec3::X,
             toward_camera,
@@ -209,7 +209,7 @@ impl Graphics {
         ));
 
         // left
-        pass.queue_draw(parallelogram(
+        pass.draw(&parallelogram(
             top_left,
             well_height * Vec3::Y,
             toward_camera,
@@ -220,7 +220,7 @@ impl Graphics {
         ));
 
         // right
-        pass.queue_draw(parallelogram(
+        pass.draw(&parallelogram(
             top_left + well_width * Vec3::X,
             well_height * Vec3::Y,
             toward_camera,
@@ -254,7 +254,7 @@ impl Graphics {
                         texture_index(piece.color) as u32,
                     );
 
-                    pass.queue_draw(rectangle(
+                    pass.draw(&rectangle(
                         Vec3::new(bx, by, 0.),
                         1.,
                         1.,
@@ -305,7 +305,7 @@ impl Graphics {
                         texture_index(block.color) as u32,
                     );
 
-                    pass.queue_draw(rectangle(
+                    pass.draw(&rectangle(
                         Vec3::new(bx, by, 0.),
                         1.,
                         1.,
@@ -321,8 +321,6 @@ impl Graphics {
             self.queue_piece(piece, true, &mut pass);
         }
 
-        pass.do_draw()?;
-
         pass.set_texture(None);
 
         for (i, row) in well.blocks.iter().enumerate() {
@@ -331,7 +329,7 @@ impl Graphics {
                     let bx = j as f32;
                     let by = i as f32;
 
-                    pass.queue_draw(solid_rectangle(Vec2::new(bx, by), Vec2::ONE, TILE_SHADOW));
+                    pass.draw(&solid_rectangle(Vec2::new(bx, by), Vec2::ONE, TILE_SHADOW));
                 }
             }
         }
@@ -355,13 +353,13 @@ impl Graphics {
                     for (dx, dy) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
                         if check(dx, dy) {
                             let (off, size) = edge_rect(dx, dy);
-                            pass.queue_draw(solid_rectangle(cell + off, size, pixel_color));
+                            pass.draw(&solid_rectangle(cell + off, size, pixel_color));
                         }
                     }
                     for (dx, dy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
                         if !check(dx, 0) && !check(0, dy) && check(dx, dy) {
                             let (off, size) = edge_rect(dx, dy);
-                            pass.queue_draw(solid_rectangle(cell + off, size, pixel_color));
+                            pass.draw(&solid_rectangle(cell + off, size, pixel_color));
                         }
                     }
                 }
@@ -378,7 +376,7 @@ impl Graphics {
                         let bx = piece.x as f32 + j as f32;
                         let by = piece.y as f32 + i as f32;
 
-                        pass.queue_draw(rectangle(
+                        pass.draw(&rectangle(
                             Vec3::new(bx, by, 0.),
                             1.,
                             1.,
@@ -395,7 +393,6 @@ impl Graphics {
                 }
             }
         }
-        pass.do_draw()?;
 
         Ok(())
     }
@@ -408,7 +405,6 @@ impl Graphics {
         pass.set_texture(Some(&self.tilemap));
 
         self.queue_piece(next, false, &mut pass);
-        pass.do_draw()?;
 
         Ok(())
     }
@@ -417,7 +413,7 @@ impl Graphics {
 
         pass.set_texture(Some(bg));
 
-        pass.queue_draw(rectangle(
+        pass.draw(&rectangle(
             Vec3::ZERO,
             1.,
             1.,
@@ -425,7 +421,6 @@ impl Graphics {
             Vec2::ONE,
             wgpu::Color::WHITE,
         ));
-        pass.do_draw()?;
 
         Ok(())
     }
@@ -450,13 +445,12 @@ impl Graphics {
         pass.set_texture(None);
 
         Graphics::queue_well_bg(&mut pass);
-        pass.do_draw()?;
 
         pass.set_texture(Some(&self.well));
 
         let well_width = WELL_COLS as f32;
         let well_height = WELL_ROWS as f32;
-        pass.queue_draw(parallelogram(
+        pass.draw(&parallelogram(
             Vec3::new(well_width / -2., well_height / -2., 0.),
             well_width * Vec3::X,
             well_height * Vec3::Y,
@@ -466,10 +460,8 @@ impl Graphics {
             wgpu::Color::WHITE,
         ));
 
-        pass.do_draw()?;
-
         pass.set_texture(Some(&self.next));
-        pass.queue_draw(parallelogram(
+        pass.draw(&parallelogram(
             Vec3::new(4. / -2., well_height / -2. - 3.5, 0.),
             4. * Vec3::X,
             4. * Vec3::Y,
@@ -478,7 +470,6 @@ impl Graphics {
             Vec2::Y,
             wgpu::Color::WHITE,
         ));
-        pass.do_draw()?;
 
         let point = pass.world_to_view(Vec3::new(well_width / 2. + 1., well_height / -2., 0.));
         Graphics::score_text(&mut self.score_buffer, text, level_to_gravity(level), level);
