@@ -1,4 +1,4 @@
-use crate::gpu::context::Context;
+use crate::gpu::context::{Context, ContextError};
 use crate::gpu::pass::Pass;
 use glam::Vec2;
 use glyphon::fontdb;
@@ -68,7 +68,7 @@ impl TextRenderer {
         buffer: &mut glyphon::Buffer,
         point: Vec2,
         scale: f32,
-    ) -> Result<(), String> {
+    ) -> Result<(), ContextError> {
         self.viewport.update(
             &pass.ctx.queue,
             glyphon::Resolution {
@@ -76,36 +76,31 @@ impl TextRenderer {
                 height: pass.ctx.config.height,
             },
         );
-        self.text_renderer
-            .prepare(
-                &pass.ctx.device,
-                &pass.ctx.queue,
-                &mut self.font_system,
-                &mut self.atlas,
-                &mut self.viewport,
-                [glyphon::TextArea {
-                    buffer,
-                    left: point.x,
-                    top: point.y,
-                    scale,
-                    bounds: glyphon::TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: pass.ctx.config.width as i32,
-                        bottom: pass.ctx.config.height as i32,
-                    },
-                    default_color: glyphon::Color::rgb(255, 255, 255),
-                    custom_glyphs: &[],
-                }],
-                &mut self.swash_cache,
-            )
-            .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to prepare a text render: {}", e))?;
+        self.text_renderer.prepare(
+            &pass.ctx.device,
+            &pass.ctx.queue,
+            &mut self.font_system,
+            &mut self.atlas,
+            &mut self.viewport,
+            [glyphon::TextArea {
+                buffer,
+                left: point.x,
+                top: point.y,
+                scale,
+                bounds: glyphon::TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: pass.ctx.config.width as i32,
+                    bottom: pass.ctx.config.height as i32,
+                },
+                default_color: glyphon::Color::rgb(255, 255, 255),
+                custom_glyphs: &[],
+            }],
+            &mut self.swash_cache,
+        )?;
 
         self.text_renderer
-            .render(&self.atlas, &self.viewport, pass.raw())
-            .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to complete a text render: {}", e))?;
+            .render(&self.atlas, &self.viewport, pass.raw())?;
 
         Ok(())
     }

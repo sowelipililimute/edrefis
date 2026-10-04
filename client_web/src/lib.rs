@@ -35,11 +35,7 @@ impl WebApp {
         let gpu = Context::new(
             canvas.width(),
             canvas.height(),
-            |instance| {
-                instance
-                    .create_surface(SurfaceTarget::Canvas(canvas))
-                    .map_err(|e| format!("failed to create instance for canvas: {}", e))
-            },
+            |instance| instance.create_surface(SurfaceTarget::Canvas(canvas)),
             Box::new(|error| {
                 let desc = error.to_string();
                 let log = format!("Unhandled GPU error {desc}");
@@ -60,17 +56,16 @@ impl WebApp {
 
 #[wasm_bindgen]
 impl WebApp {
-    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
-        self.app
-            .resize(width, height)
-            .map_err(|e| format!("failed to resize canvas: {}", e))
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.app.resize(width, height)
     }
     pub fn tick(&mut self) {
-        self.app
-            .tick(&mut self.input_provider, &mut NoopHooks, &mut NoopHooks);
+        self.app.tick(&mut self.input_provider, &mut NoopHooks);
     }
     pub fn draw(&mut self) -> Result<(), String> {
-        self.app.render_world()
+        self.app
+            .render_world()
+            .map_err(|e| format!("failed to render world: {}", e))
     }
     pub fn key_down(&mut self, event: web_sys::KeyboardEvent) {
         self.input_provider.push_key(event.code());

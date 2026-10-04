@@ -1,4 +1,5 @@
 use std::{borrow::Cow, cell::RefCell, rc::Rc};
+use thiserror::Error;
 use wgpu::UncapturedErrorHandler;
 
 use crate::gpu::{buffer::GpuBuffers, frame::Frame, geometry::AVertex};
@@ -68,19 +69,40 @@ pub struct Context<'surface> {
     samplers: Samplers,
 }
 
+#[derive(Error, Debug)]
+pub enum ContextError {
+    #[error("failed to obtain surface")]
+    SurfaceError(Box<dyn std::error::Error>),
+    #[error("adapter not found")]
+    AdapterNotFound,
+    #[error("failed to obtain adapter")]
+    RequestError(#[from] wgpu::RequestDeviceError),
+    #[error("failed to load PNG {0}")]
+    PngError(minipng::Error),
+    #[error("failed to get current texture of surface")]
+    FrameError(#[from] wgpu::SurfaceError),
+    #[error("failed to prepare a text render")]
+    TextPrepareError(#[from] glyphon::PrepareError),
+    #[error("failed to complete a text render")]
+    TextRenderError(#[from] glyphon::RenderError),
+}
+
 impl<'surface> Context<'surface> {
-    pub async fn new<F: FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'surface>, String>>(
+    pub async fn new<
+        ESurface: std::error::Error + 'static,
+        F: FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'surface>, ESurface>,
+    >(
         width: u32,
         height: u32,
         maker: F,
         error_handler: Box<dyn UncapturedErrorHandler>,
-    ) -> Result<Context<'surface>, String> {
+    ) -> Result<Context<'surface>, ContextError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY | wgpu::Backends::SECONDARY,
             dx12_shader_compiler: Default::default(),
             ..Default::default()
         });
-        let surface = maker(&instance).map_err(|e| format!("failed to obtain surface: {}", e))?;
+        let surface = maker(&instance).map_err(|e| ContextError::SurfaceError(Box::new(e)))?;
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -89,7 +111,7 @@ impl<'surface> Context<'surface> {
                 compatible_surface: Some(&surface),
             })
             .await
-            .ok_or("adapter not found")?;
+            .ok_or(ContextError::AdapterNotFound)?;
 
         let (device, queue) = adapter
             .request_device(
@@ -101,9 +123,7 @@ impl<'surface> Context<'surface> {
                 },
                 None,
             )
-            .await
-            .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to obtain adapter: {}", e))?;
+            .await?;
 
         device.on_uncaptured_error(error_handler);
         let surface_caps = surface.get_capabilities(&adapter);
@@ -341,17 +361,12 @@ impl<'surface> Context<'surface> {
         &self,
         png_bytes: &[u8],
         filter: wgpu::FilterMode,
-    ) -> Result<Texture, String> {
-        let header = minipng::decode_png_header(png_bytes)
-            .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to decode PNG header: {}", e))?;
+    ) -> Result<Texture, ContextError> {
+        let header = minipng::decode_png_header(png_bytes).map_err(ContextError::PngError)?;
         let mut buffer = vec![0; header.required_bytes_rgba8bpc()];
-        let mut png = minipng::decode_png(png_bytes, &mut buffer)
-            .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to decode PNG: {}", e))?;
-        png.convert_to_rgba8bpc()
-            .map_err(|e| e.to_string())
-            .map_err(|e| format!("failed to convert PNG to rgba8bpc: {}", e))?;
+        let mut png =
+            minipng::decode_png(png_bytes, &mut buffer).map_err(ContextError::PngError)?;
+        png.convert_to_rgba8bpc().map_err(ContextError::PngError)?;
 
         Ok(Context::make_texture(
             &self.device,
@@ -368,15 +383,13 @@ impl<'surface> Context<'surface> {
             },
         ))
     }
-    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+    pub fn resize(&mut self, width: u32, height: u32) {
         self.config.width = width as u32;
         self.config.height = height as u32;
 
         self.surface.configure(&self.device, &self.config);
-
-        Ok(())
     }
-    pub fn frame<'context>(&'context self) -> Result<Frame<'context, 'surface>, String> {
+    pub fn frame<'context>(&'context self) -> Result<Frame<'context, 'surface>, ContextError> {
         let mut b = self.buffers.borrow_mut();
         b.vertices.reset();
         b.indices.reset();
@@ -385,7 +398,7 @@ impl<'surface> Context<'surface> {
         let frame = self
             .surface
             .get_current_texture()
-            .map_err(|e| format!("failed to get current texture of surface: {}", e))?;
+            .map_err(ContextError::FrameError)?;
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
             format: Some(self.format),
             ..Default::default()

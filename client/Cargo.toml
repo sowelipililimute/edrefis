@@ -12,3 +12,4 @@ glyphon = "0.7.0"
 cosmic-text = { version = "0.12", features = ["std", "swash"], default-features = false }
 minipng = "0.1.1"
 hecs = { workspace = true }
+thiserror = { workspace = true }

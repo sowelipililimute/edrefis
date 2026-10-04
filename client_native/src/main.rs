@@ -3,10 +3,11 @@ mod sounds;
 use crate::sounds::ClientSounds;
 use client::input::KeyboardInputs;
 use client::{app::App, gpu};
-use logic::{hooks::NoopHooks, input::Input, well::WELL_COLS};
+use logic::{input::Input, well::WELL_COLS};
 use sdl::{event::Event, event::WindowEvent, keyboard::Keycode};
 use sdl3::{self as sdl};
 use std::time::Duration;
+use thiserror::Error;
 
 fn input_to_sdl_key(keycode: Input) -> Keycode {
     match keycode {
@@ -22,18 +23,23 @@ fn input_to_sdl_key(keycode: Input) -> Keycode {
     }
 }
 
-pub fn main() -> Result<(), String> {
-    let ctx = sdl::init().map_err(|e| e.to_string())?;
+#[derive(Error, Debug)]
+pub enum NativeAppError {
+    #[error("SDL error")]
+    SDLError(#[from] sdl::Error),
+    #[error("window error")]
+    WindowError(#[from] sdl::video::WindowBuildError),
+    #[error("graphics error")]
+    GraphicsError(#[from] gpu::context::ContextError),
+}
 
-    let video = ctx.video().map_err(|e| e.to_string())?;
-    let _audio = ctx.audio().map_err(|e| e.to_string())?;
+pub fn main() -> Result<(), NativeAppError> {
+    let ctx = sdl::init()?;
 
-    // let frequency = 44_100;
-    // let format = sdl::mixer::AUDIO_S16LSB;
-    // let channels = sdl::mixer::DEFAULT_CHANNELS;
-    // let chunk_size = 1_024;
+    let video = ctx.video()?;
+    let _audio = ctx.audio()?;
 
-    let mixer = sdl::mixer::Mixer::open_device(None).map_err(|e| e.to_string())?;
+    let mixer = sdl::mixer::Mixer::open_device(None)?;
 
     let window = video
         .window("Edrefis", WELL_COLS as u32 * 60, WELL_COLS as u32 * 60)
@@ -41,8 +47,7 @@ pub fn main() -> Result<(), String> {
         .resizable()
         .high_pixel_density()
         .metal_view()
-        .build()
-        .map_err(|e| e.to_string())?;
+        .build()?;
 
     let (width, height) = window.size_in_pixels();
 
@@ -50,9 +55,7 @@ pub fn main() -> Result<(), String> {
         width,
         height,
         |instance| unsafe {
-            instance
-                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).unwrap())
-                .map_err(|e| e.to_string())
+            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).unwrap())
         },
         Box::new(|error| eprintln!("Unhandled GPU error {error}")),
     ))?;
@@ -60,8 +63,8 @@ pub fn main() -> Result<(), String> {
     let mut app = App::new(gpu_state)?;
     let mut input_provider = KeyboardInputs::new(input_to_sdl_key);
 
-    let mut event_pump = ctx.event_pump().map_err(|e| e.to_string())?;
-    let mut sounds = ClientSounds::new(&mixer).map_err(|e| e.to_string())?;
+    let mut event_pump = ctx.event_pump()?;
+    let mut sounds = ClientSounds::new(&mixer)?;
 
     let mut stepper = nanotime::StepData::new(Duration::from_secs_f64(1. / 60.));
 
@@ -72,7 +75,7 @@ pub fn main() -> Result<(), String> {
                     window_id,
                     win_event: WindowEvent::PixelSizeChanged(width, height),
                     ..
-                } if window_id == window.id() => app.resize(width as u32, height as u32)?,
+                } if window_id == window.id() => app.resize(width as u32, height as u32),
                 Event::KeyDown {
                     keycode: Some(key), ..
                 } => input_provider.push_key(key),
@@ -86,7 +89,7 @@ pub fn main() -> Result<(), String> {
             }
         }
 
-        app.tick(&mut input_provider, &mut sounds, &mut NoopHooks);
+        app.tick(&mut input_provider, &mut sounds);
         app.render_world()?;
 
         stepper.step();

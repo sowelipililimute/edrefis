@@ -6,7 +6,7 @@ use hecs::{Entity, World};
 use nanoserde::{DeJson, SerJson};
 
 use crate::{
-    hooks::{Cubes, Sounds},
+    hooks::Sounds,
     input::{FrameInputs, Input, InputState, PendingInput},
     piece::Piece,
     randomizer::Randomizer,
@@ -116,7 +116,7 @@ pub fn set_input(world: &mut World, field: Entity, frame: FrameInputs) {
     }
 }
 
-pub fn field_system(world: &mut World, tick: u64, sounds: &mut dyn Sounds, cubes: &mut dyn Cubes) {
+pub fn field_system(world: &mut World, tick: u64, sounds: &mut dyn Sounds) {
     for (well, next, level, state, randomizer, inputs, pending_input) in world.query_mut::<(
         &mut Well,
         &mut Piece,
@@ -146,12 +146,6 @@ pub fn field_system(world: &mut World, tick: u64, sounds: &mut dyn Sounds, cubes
 
                         let ticks_of_line_clear = 41;
                         let rows_to_lower = cleared_rows.iter().map(|x| x.0).collect::<Vec<i32>>();
-
-                        for (y, row) in &cleared_rows {
-                            for (x, col) in row.iter().rev().enumerate() {
-                                cubes.spawn_cube(x as i32, *y as i32, col.unwrap().color);
-                            }
-                        }
 
                         *state = GameState::ClearDelay {
                             ticks_remaining: ticks_of_line_clear,

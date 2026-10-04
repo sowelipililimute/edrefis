@@ -4,7 +4,7 @@
 
 use crate::gpu::{
     camera::{Camera2D, TileCamera},
-    context::{Context, Texture},
+    context::{Context, ContextError, Texture},
     frame::{Frame, RenderTarget},
     geometry::{rectangle, solid_rectangle},
     pass::Pass,
@@ -107,7 +107,7 @@ fn edge_rect(dx: i32, dy: i32) -> (Vec2, Vec2) {
 }
 
 impl Graphics {
-    pub fn new(ctx: &Context, text: &mut TextRenderer) -> Result<Graphics, String> {
+    pub fn new(ctx: &Context, text: &mut TextRenderer) -> Result<Graphics, ContextError> {
         let tilemap =
             ctx.texture_from_png(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Nearest)?;
 
@@ -225,12 +225,7 @@ impl Graphics {
             }
         }
     }
-    pub fn render_well(
-        &self,
-        well: &Well,
-        piece: Option<&Piece>,
-        pass: &mut Pass,
-    ) -> Result<(), String> {
+    pub fn render_well(&self, well: &Well, piece: Option<&Piece>, pass: &mut Pass) {
         pass.set_camera(&tile_camera(WELL_ORIGIN));
         pass.set_texture(Some(&self.tilemap));
 
@@ -345,18 +340,14 @@ impl Graphics {
                 }
             }
         }
-
-        Ok(())
     }
-    pub fn render_next(&self, next: &Piece, pass: &mut Pass) -> Result<(), String> {
+    pub fn render_next(&self, next: &Piece, pass: &mut Pass) {
         pass.set_camera(&tile_camera(NEXT_ORIGIN));
         pass.set_texture(Some(&self.tilemap));
 
         self.queue_piece(next, false, pass);
-
-        Ok(())
     }
-    pub fn render_background(&self, level: u32, pass: &mut Pass) -> Result<(), String> {
+    pub fn render_background(&self, level: u32, pass: &mut Pass) {
         let bg = &self.backgrounds[(level / 100).min(self.backgrounds.len() as u32 - 1) as usize];
 
         pass.set_texture(Some(bg));
@@ -369,8 +360,6 @@ impl Graphics {
             Vec2::ONE,
             wgpu::Color::WHITE,
         ));
-
-        Ok(())
     }
     pub fn render(
         &mut self,
@@ -380,18 +369,18 @@ impl Graphics {
         next: &Piece,
         frame: &mut Frame,
         text: &mut TextRenderer,
-    ) -> Result<(), String> {
+    ) -> Result<(), ContextError> {
         let mut pass = frame.pass(RenderTarget::Screen, Some(wgpu::Color::BLACK));
 
         pass.set_camera(&Camera2D::from_rect(Vec2::ZERO, Vec2::new(1., 1.)));
-        self.render_background(level, &mut pass)?;
+        self.render_background(level, &mut pass);
 
         pass.set_camera(&tile_camera(Vec2::ZERO));
         pass.set_texture(None);
 
         Graphics::queue_well_bg(&mut pass);
 
-        self.render_well(well, piece, &mut pass)?;
+        self.render_well(well, piece, &mut pass);
 
         pass.set_camera(&tile_camera(Vec2::ZERO));
         pass.set_texture(Some(&self.frame));
@@ -404,7 +393,7 @@ impl Graphics {
             wgpu::Color::WHITE,
         ));
 
-        self.render_next(next, &mut pass)?;
+        self.render_next(next, &mut pass);
 
         pass.set_camera(&tile_camera(Vec2::ZERO));
         let point = pass

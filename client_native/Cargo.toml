@@ -10,3 +10,4 @@ nanotime = { path = "../nanotime" }
 client = { path = "../client" }
 logic = { path = "../logic" }
 wgpu = { workspace = true }
+thiserror = { workspace = true }
