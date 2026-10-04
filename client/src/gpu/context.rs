@@ -116,7 +116,8 @@ impl<'surface> Context<'surface> {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                        .using_resolution(adapter.limits()),
                     label: Some("device"),
                     required_features: wgpu::Features::empty(),
                     memory_hints: wgpu::MemoryHints::Performance,
