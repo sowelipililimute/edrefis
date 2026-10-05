@@ -93,7 +93,7 @@ const FRAME_SIZE: Vec2 = Vec2::new(WELL_COLS as f32 + 2., VISIBLE_ROWS + 2.);
 const WELL_ORIGIN: Vec2 = Vec2::new(WELL_COLS as f32 / -2., VISIBLE_ROWS / -2. - 1.);
 const NEXT_ORIGIN: Vec2 = Vec2::new(-2., FRAME_SIZE.y / -2. - 5.);
 
-fn tile_camera(origin: Vec2) -> TileCamera {
+pub fn tile_camera(origin: Vec2) -> TileCamera {
     TileCamera {
         height_tiles: VIEW_HEIGHT_TILES,
         origin,
