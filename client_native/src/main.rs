@@ -60,7 +60,7 @@ pub fn main() -> Result<(), NativeAppError> {
         Box::new(|error| eprintln!("Unhandled GPU error {error}")),
     ))?;
 
-    let mut app = App::new(gpu_state)?;
+    let mut app = App::new(gpu_state, window.display_scale())?;
     let mut input_provider = KeyboardInputs::new(input_to_sdl_key);
 
     let mut event_pump = ctx.event_pump()?;
@@ -75,7 +75,9 @@ pub fn main() -> Result<(), NativeAppError> {
                     window_id,
                     win_event: WindowEvent::PixelSizeChanged(width, height),
                     ..
-                } if window_id == window.id() => app.resize(width as u32, height as u32),
+                } if window_id == window.id() => {
+                    app.resize(width as u32, height as u32, window.display_scale())
+                }
                 Event::KeyDown {
                     keycode: Some(key), ..
                 } => input_provider.push_key(key),

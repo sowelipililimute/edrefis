@@ -104,4 +104,15 @@ impl TextRenderer {
 
         Ok(())
     }
+    pub fn measure(&mut self, buffer: &mut glyphon::Buffer, max_width: Option<f32>) -> Vec2 {
+        buffer.set_size(&mut self.font_system, max_width, None);
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        buffer.layout_runs().fold(Vec2::ZERO, |size, run| {
+            Vec2::new(
+                size.x.max(run.line_w),
+                size.y.max(run.line_top + run.line_height),
+            )
+        })
+    }
 }

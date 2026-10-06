@@ -6,7 +6,7 @@ use crate::{
         frame::Frame,
         text::TextRenderer,
     },
-    graphics::Graphics,
+    graphics::GraphicsResources,
     input::ClientInputs,
 };
 
@@ -20,8 +20,9 @@ pub enum Transition {
 }
 
 pub struct DrawContext {
-    pub graphics: Graphics,
+    pub graphics: GraphicsResources,
     pub text: TextRenderer,
+    pub scale: f32,
 }
 
 pub trait Scene {

@@ -5,7 +5,7 @@ use crate::{
         context::{Context, ContextError},
         text::TextRenderer,
     },
-    graphics::Graphics,
+    graphics::GraphicsResources,
     input::ClientInputs,
     scene::{DrawContext, Scene, Transition, menu::Menu},
 };
@@ -17,13 +17,17 @@ pub struct App<'surface> {
 }
 
 impl<'surface> App<'surface> {
-    pub fn new(gpu: Context<'surface>) -> Result<App<'surface>, ContextError> {
+    pub fn new(gpu: Context<'surface>, scale: f32) -> Result<App<'surface>, ContextError> {
         let mut text = TextRenderer::new(&gpu);
-        let graphics = Graphics::new(&gpu, &mut text)?;
-        let mut draw = DrawContext { graphics, text };
+        let graphics = GraphicsResources::new(&gpu, &mut text)?;
+        let mut draw = DrawContext {
+            graphics,
+            text,
+            scale,
+        };
 
         Ok(App {
-            scenes: vec![Box::new(Menu::new(&mut draw))],
+            scenes: vec![Box::new(Menu::new(&mut draw)?)],
             gpu,
             draw,
         })
@@ -77,7 +81,8 @@ impl<'surface> App<'surface> {
         Ok(())
     }
 
-    pub fn resize(self: &mut App<'surface>, width: u32, height: u32) {
-        self.gpu.resize(width, height)
+    pub fn resize(self: &mut App<'surface>, width: u32, height: u32, scale: f32) {
+        self.gpu.resize(width, height);
+        self.draw.scale = scale;
     }
 }

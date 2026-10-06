@@ -17,7 +17,7 @@ async function run() {
     if (resize) {
       canvas.width = canvas.clientWidth
       canvas.height = canvas.clientHeight
-      app.resize(canvas.width, canvas.height)
+      app.resize(canvas.width, canvas.height, 1)
       resize = false
     }
     const now = performance.now()

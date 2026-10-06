@@ -47,7 +47,7 @@ impl GridAtlas {
 
 const TILES_ATLAS: GridAtlas = GridAtlas { cols: 16, rows: 8 };
 
-pub struct Graphics {
+pub struct GraphicsResources {
     tilemap: Texture,
     backgrounds: Vec<Texture>,
     frame: Texture,
@@ -106,22 +106,22 @@ fn edge_rect(dx: i32, dy: i32) -> (Vec2, Vec2) {
     (Vec2::new(pos(dx), pos(dy)), Vec2::new(len(dx), len(dy)))
 }
 
-impl Graphics {
-    pub fn new(ctx: &Context, text: &mut TextRenderer) -> Result<Graphics, ContextError> {
+impl GraphicsResources {
+    pub fn new(ctx: &Context, text: &mut TextRenderer) -> Result<GraphicsResources, ContextError> {
         let tilemap =
             ctx.texture_from_png(include_bytes!("gfx/tiles.png"), wgpu::FilterMode::Nearest)?;
 
         let frame =
             ctx.texture_from_png(include_bytes!("gfx/frame.png"), wgpu::FilterMode::Nearest)?;
         let mut buffer = text.create_buffer();
-        Graphics::score_text(&mut buffer, text, 0, 0);
+        GraphicsResources::score_text(&mut buffer, text, 0, 0);
 
         let backgrounds = BACKGROUNDS
             .iter()
             .map(|png| ctx.texture_from_png(png, wgpu::FilterMode::Linear))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Graphics {
+        Ok(GraphicsResources {
             tilemap,
             frame,
             score_buffer: buffer,
@@ -378,7 +378,7 @@ impl Graphics {
         pass.set_camera(&tile_camera(Vec2::ZERO));
         pass.set_texture(None);
 
-        Graphics::queue_well_bg(&mut pass);
+        GraphicsResources::queue_well_bg(&mut pass);
 
         self.render_well(well, piece, &mut pass);
 
@@ -399,7 +399,7 @@ impl Graphics {
         let point = pass
             .world_to_view((FRAME_SIZE * Vec2::new(0.5, -0.5) + Vec2::X).extend(0.))
             .round();
-        Graphics::score_text(&mut self.score_buffer, text, level_to_gravity(level), level);
+        GraphicsResources::score_text(&mut self.score_buffer, text, level_to_gravity(level), level);
         let scale = tile_camera(Vec2::ZERO).tile_px(&pass.ctx.config) / TEXT_TILE_PX;
         text.draw_text(&mut pass, &mut self.score_buffer, point, scale)?;
 

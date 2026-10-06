@@ -13,3 +13,4 @@ cosmic-text = { version = "0.12", features = ["std", "swash"], default-features 
 minipng = "0.1.1"
 hecs = { workspace = true }
 thiserror = { workspace = true }
+taffy = "0.14.0"
