@@ -45,7 +45,7 @@ impl WebApp {
         .await
         .map_err(|e| format!("failed to set up gpu: {}", e))?;
 
-        let app = App::new(gpu, 1.).map_err(|e| format!("failed to load app: {e}"))?;
+        let app = App::new(gpu).map_err(|e| format!("failed to load app: {e}"))?;
 
         Ok(WebApp {
             app,
@@ -56,8 +56,8 @@ impl WebApp {
 
 #[wasm_bindgen]
 impl WebApp {
-    pub fn resize(&mut self, width: u32, height: u32, scale: f32) {
-        self.app.resize(width, height, scale)
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.app.resize(width, height)
     }
     pub fn tick(&mut self) {
         self.app.tick(&mut self.input_provider, &mut NoopHooks);

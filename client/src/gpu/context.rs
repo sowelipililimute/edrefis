@@ -85,8 +85,6 @@ pub enum ContextError {
     TextPrepareError(#[from] glyphon::PrepareError),
     #[error("failed to complete a text render")]
     TextRenderError(#[from] glyphon::RenderError),
-    #[error("failed to perform layout")]
-    LayoutError(#[from] taffy::TaffyError),
 }
 
 impl<'surface> Context<'surface> {
