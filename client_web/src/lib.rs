@@ -27,6 +27,7 @@ fn input_to_web_code(key: Input) -> &'static str {
         Input::CW2 => "KeyV",
         Input::CCW2 => "KeyC",
         Input::DebugLevel => "KeyA",
+        Input::Start => "Enter",
     }
 }
 

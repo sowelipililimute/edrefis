@@ -16,10 +16,11 @@ pub enum Input {
     CCW = 6,
     CCW2 = 7,
     DebugLevel = 8,
+    Start = 9,
 }
 
 impl Input {
-    pub const COUNT: usize = 9;
+    pub const COUNT: usize = 10;
     pub const ALL: [Input; Input::COUNT] = [
         Input::Up,
         Input::Down,
@@ -30,6 +31,7 @@ impl Input {
         Input::CCW,
         Input::CCW2,
         Input::DebugLevel,
+        Input::Start,
     ];
 }
 

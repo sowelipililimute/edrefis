@@ -40,7 +40,7 @@ impl Menu {
 impl Scene for Menu {
     fn tick(&mut self, inputs: &mut dyn ClientInputs, _sounds: &mut dyn Sounds) -> Transition {
         let input = inputs.sample();
-        if input.is_set(Input::Up) {
+        if input.is_set(Input::Start) {
             Transition::Replace(Box::new(Game::new()))
         } else {
             Transition::None
