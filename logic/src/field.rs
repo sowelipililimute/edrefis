@@ -121,20 +121,27 @@ pub fn set_input<W: World>(world: &mut W, field: Entity, frame: FrameInputs) {
 
 pub fn field_system<W: World>(world: &mut W) {
     let tick = world.tick();
-    for (well, next, level, state, randomizer, inputs, pending_input) in world.query_mut::<(
-        &mut Well,
-        &mut Piece,
-        &mut Level,
-        &mut GameState,
-        &mut Randomizer,
-        &mut InputState,
-        &PendingInput,
-    )>() {
+    for (uid, well, next, level, state, randomizer, inputs, pending_input) in world
+        .query::<(
+            Entity,
+            &mut Well,
+            &mut Piece,
+            &mut Level,
+            &mut GameState,
+            &mut Randomizer,
+            &mut InputState,
+            &PendingInput,
+        )>()
+        .iter()
+    {
         inputs.tick(tick, pending_input.0);
 
         if inputs.just_pressed(Input::DebugLevel) {
             level.0 += 50;
+            world.dirty::<&Level>(uid);
         }
+
+        world.dirty::<&GameState>(uid);
         match state {
             GameState::ActivePiece { ref mut piece } => {
                 piece.do_sonic(&well, inputs);
@@ -143,6 +150,8 @@ pub fn field_system<W: World>(world: &mut W) {
                 piece.do_gravity(&well, inputs, level_to_gravity(level.0), true);
 
                 if piece.do_lock(well, inputs) {
+                    world.dirty::<&Well>(uid);
+
                     let cleared_rows = well.do_clear();
                     if cleared_rows.len() > 0 {
                         // sounds.line_clear();
@@ -173,6 +182,8 @@ pub fn field_system<W: World>(world: &mut W) {
                     *state = GameState::PlaceDelay {
                         ticks_remaining: 30,
                     };
+
+                    world.dirty::<&Well>(uid);
                 }
             }
             GameState::PlaceDelay {
@@ -196,6 +207,7 @@ pub fn field_system<W: World>(world: &mut W) {
                         next.do_gravity(&well, inputs, level_to_gravity(level.0), false);
                         *state = GameState::ActivePiece { piece: *next };
                         *next = randomizer.next_piece();
+                        world.dirty::<&Piece>(uid);
                         // sounds.block_spawn(next.color);
                     }
                 }
@@ -214,6 +226,8 @@ pub fn field_system<W: World>(world: &mut W) {
                     };
                     *randomizer = new_randomizer;
                     level.0 = 0;
+
+                    world.dirty::<(&Piece, &Well, &GameState, &Randomizer, &Level)>(uid);
                 }
             }
         }

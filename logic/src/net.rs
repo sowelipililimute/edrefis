@@ -14,6 +14,7 @@ use crate::{
 pub trait World {
     fn new() -> Self;
     fn spawn(&mut self, components: impl DynamicBundle) -> Entity;
+    fn query<Q: hecs::Query>(&self) -> hecs::QueryBorrow<'_, Q>;
     fn query_mut<Q: hecs::Query>(&mut self) -> hecs::QueryMut<'_, Q>;
     fn insert(
         &mut self,
@@ -27,6 +28,7 @@ pub trait World {
     fn iter(&self) -> hecs::Iter<'_>;
     fn tick(&self) -> Tick;
     fn increment_tick(&mut self);
+    fn dirty<Q: hecs::Query>(&self, entity: Entity);
 }
 
 pub struct ClientWorld {
@@ -45,6 +47,9 @@ impl World for ClientWorld {
     }
     fn spawn(&mut self, components: impl DynamicBundle) -> Entity {
         self.world.spawn(components)
+    }
+    fn query<Q: hecs::Query>(&self) -> hecs::QueryBorrow<'_, Q> {
+        self.world.query()
     }
     fn query_mut<Q: hecs::Query>(&mut self) -> hecs::QueryMut<'_, Q> {
         self.world.query_mut()
@@ -71,6 +76,7 @@ impl World for ClientWorld {
     fn increment_tick(&mut self) {
         self.tick = Tick(self.tick.0 + 1);
     }
+    fn dirty<Q: hecs::Query>(&self, _entity: Entity) {}
 }
 
 impl ClientWorld {
@@ -119,6 +125,13 @@ impl World for ServerWorld {
     }
     fn spawn(&mut self, components: impl DynamicBundle) -> Entity {
         let mut builder = EntityBuilder::new();
+
+        for (type_id, registration) in &self.registry.components {
+            if components.with_ids(|types| types.contains(type_id)) {
+                (registration.dirty_spawn_component)(&mut builder, self.tick);
+            }
+        }
+
         builder.add_bundle(components).add(Replicated {
             id: self.next_uid,
             spawned_at: self.tick,
@@ -126,6 +139,9 @@ impl World for ServerWorld {
 
         self.next_uid = NetId(self.next_uid.0 + 1);
         self.world.spawn(builder.build())
+    }
+    fn query<Q: hecs::Query>(&self) -> hecs::QueryBorrow<'_, Q> {
+        self.world.query()
     }
     fn query_mut<Q: hecs::Query>(&mut self) -> hecs::QueryMut<'_, Q> {
         self.world.query_mut()
@@ -135,7 +151,17 @@ impl World for ServerWorld {
         entity: Entity,
         components: impl DynamicBundle,
     ) -> Result<(), hecs::NoSuchEntity> {
-        self.world.insert(entity, components)
+        let mut builder = EntityBuilder::new();
+
+        for (type_id, registration) in &self.registry.components {
+            if components.with_ids(|types| types.contains(type_id)) {
+                (registration.dirty_spawn_component)(&mut builder, self.tick);
+            }
+        }
+
+        builder.add_bundle(components);
+
+        self.world.insert(entity, builder.build())
     }
     fn get<'a, T: hecs::ComponentRef<'a>>(
         &'a self,
@@ -151,6 +177,15 @@ impl World for ServerWorld {
     }
     fn increment_tick(&mut self) {
         self.tick = Tick(self.tick.0 + 1);
+    }
+    fn dirty<Q: hecs::Query>(&self, entity: Entity) {
+        <Q::Fetch as hecs::Fetch>::for_each_borrow(|type_id, unique| {
+            if unique {
+                if let Some(registration) = self.registry.components.get(&type_id) {
+                    (registration.dirty_existing_component)(&self.world, entity, self.tick);
+                }
+            }
+        });
     }
 }
 
@@ -214,6 +249,33 @@ fn hash(string: &str) -> CompId {
     CompId(hash)
 }
 
+type DirtyExistingCallback = fn(&hecs::World, Entity, Tick) -> ();
+
+fn make_dirty_existing_callback<TComp: Send + Sync + 'static>() -> DirtyExistingCallback {
+    fn dirty_callback<TComp: Send + Sync + 'static>(
+        world: &hecs::World,
+        entity: Entity,
+        tick: Tick,
+    ) {
+        if let Ok(mut rc) = world.get::<&mut ReplicatedComp<TComp>>(entity) {
+            rc.changed_at = tick;
+        }
+    }
+    dirty_callback::<TComp>
+}
+
+type DirtySpawnCallback = fn(&mut EntityBuilder, Tick) -> ();
+
+fn make_dirty_spawn_callback<TComp: Send + Sync + 'static>() -> DirtySpawnCallback {
+    fn dirty_callback<TComp: Send + Sync + 'static>(builder: &mut EntityBuilder, tick: Tick) {
+        builder.add(ReplicatedComp::<TComp> {
+            changed_at: tick,
+            _phantom: PhantomData,
+        });
+    }
+    dirty_callback::<TComp>
+}
+
 type SerializeCallback = fn(CompId, &mut hecs::World, &mut States) -> ();
 
 fn make_serialize_callback<TComp: SerJson + Send + Sync + 'static>() -> SerializeCallback {
@@ -257,6 +319,8 @@ fn make_deserialize_callback<TComp: DeJson + Send + Sync + 'static>() -> Deseria
 #[derive(Debug)]
 struct NetComponentRegistration {
     component_id: CompId,
+    dirty_existing_component: DirtyExistingCallback,
+    dirty_spawn_component: DirtySpawnCallback,
     serialize_components: SerializeCallback,
     deserialize_components: DeserializeCallback,
 }
@@ -278,6 +342,8 @@ impl NetComponentRegistry {
             TypeId::of::<TComp>(),
             NetComponentRegistration {
                 component_id: hash(name),
+                dirty_existing_component: make_dirty_existing_callback::<TComp>(),
+                dirty_spawn_component: make_dirty_spawn_callback::<TComp>(),
                 serialize_components: make_serialize_callback::<TComp>(),
                 deserialize_components: make_deserialize_callback::<TComp>(),
             },
