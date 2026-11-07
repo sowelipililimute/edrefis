@@ -2,6 +2,7 @@ use std::{collections::HashMap, time::Duration};
 
 use hecs::Entity;
 use logic::{
+    net::{ClientWorld, NetId},
     peer::{Endpoint, Peer},
     proto::{ClientToServer, ServerToClient},
 };
@@ -10,7 +11,7 @@ pub struct ClientEndpoint;
 
 #[derive(Debug, Default)]
 pub struct ClientState {
-    server_to_client_entities: HashMap<u32, Entity>,
+    server_to_client_entities: HashMap<NetId, Entity>,
     pub ping: Duration,
 }
 
@@ -22,19 +23,25 @@ impl Endpoint for ClientEndpoint {
     type Incoming = ServerToClient;
     type Outgoing = ClientToServer;
     type State = ClientState;
+    type World = ClientWorld;
 
     fn handle_packet(peer: &mut Peer<Self>, packet: Self::Incoming) {
         match packet {
             ServerToClient::States(states) => {
-                peer.registry.apply_states(
-                    &mut peer.world,
-                    &mut peer.state.server_to_client_entities,
-                    &states,
-                );
+                peer.world
+                    .apply_states(&mut peer.state.server_to_client_entities, &states);
             }
             ServerToClient::Pong(secs, nanos) => {
                 peer.state.ping = peer.elapsed_time() - Duration::new(secs, nanos);
             }
+            ServerToClient::Welcome { tick } => todo!(),
+            ServerToClient::Snapshot {
+                current_tick,
+                inputs_acked_at,
+                starting_from,
+                changes,
+                removed,
+            } => todo!(),
         }
     }
 }

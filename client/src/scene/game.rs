@@ -1,7 +1,8 @@
 use hecs::Entity;
 use logic::{
-    field::{GameState, field_system, set_input, spawn_field},
+    field::{GameState, Level, field_system, set_input, spawn_field},
     hooks::Sounds,
+    net::World,
     piece::Piece,
     well::Well,
 };
@@ -19,7 +20,6 @@ use crate::{
 pub struct Game {
     client: Client,
     field: Entity,
-    ticks: u64,
 }
 
 impl Game {
@@ -27,19 +27,15 @@ impl Game {
         let mut client = Client::new();
         let field = spawn_field(&mut client.world);
 
-        Game {
-            client,
-            field,
-            ticks: 0,
-        }
+        Game { client, field }
     }
 }
 
 impl Scene for Game {
-    fn tick(&mut self, inputs: &mut dyn ClientInputs, sounds: &mut dyn Sounds) -> Transition {
-        self.ticks += 1;
+    fn tick(&mut self, inputs: &mut dyn ClientInputs, _sounds: &mut dyn Sounds) -> Transition {
+        self.client.world.increment_tick();
         set_input(&mut self.client.world, self.field, inputs.sample());
-        field_system(&mut self.client.world, self.ticks, sounds);
+        field_system(&mut self.client.world);
 
         Transition::None
     }
@@ -53,7 +49,7 @@ impl Scene for Game {
         for (well, level, state, next) in self
             .client
             .world
-            .query_mut::<(&Well, &u32, &GameState, &Piece)>()
+            .query_mut::<(&Well, &Level, &GameState, &Piece)>()
         {
             match state {
                 GameState::ActivePiece { piece, .. } => {

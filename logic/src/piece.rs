@@ -6,7 +6,6 @@ use std::cmp::max;
 
 use nanoserde::{DeJson, SerJson};
 
-use crate::hooks::Sounds;
 use crate::input::{Input, InputState};
 use crate::well::{Block, BlockDirections, Tile, Well, WELL_COLS, WELL_ROWS};
 
@@ -138,14 +137,7 @@ impl Piece {
             }
         }
     }
-    pub fn do_gravity(
-        &mut self,
-        well: &Well,
-        inputs: &InputState,
-        rate: i32,
-        sound: &mut dyn Sounds,
-        inputs_active: bool,
-    ) {
+    pub fn do_gravity(&mut self, well: &Well, inputs: &InputState, rate: i32, inputs_active: bool) {
         if inputs.pressed(Input::Down) && inputs_active {
             self.ticks_to_next_gravity -= max(rate, 256);
         } else {
@@ -164,7 +156,7 @@ impl Piece {
         }
 
         if self.collides_with(well, 0, 1, self.rotation) && self.ticks_to_lock == 30 {
-            sound.land();
+            // sound.land();
         }
 
         if self.collides_with(well, 0, 1, self.rotation) {
@@ -195,12 +187,12 @@ impl Piece {
             }
         }
     }
-    pub fn do_lock(&self, well: &mut Well, inputs: &InputState, sounds: &mut dyn Sounds) -> bool {
+    pub fn do_lock(&self, well: &mut Well, inputs: &InputState) -> bool {
         if self.collides_with(well, 0, 1, self.rotation)
             && (self.ticks_to_lock == 0 || inputs.pressed(Input::Down))
         {
             self.lock_to(well);
-            sounds.lock();
+            // sounds.lock();
             true
         } else {
             false

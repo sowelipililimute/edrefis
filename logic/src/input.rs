@@ -4,6 +4,8 @@
 
 use nanoserde::{DeJson, SerJson};
 
+use crate::net::Tick;
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum Input {
@@ -55,9 +57,9 @@ impl FrameInputs {
 #[derive(Debug, Clone, SerJson, DeJson, Default)]
 pub struct InputState {
     previous: FrameInputs,
-    inputs: [u64; Input::COUNT],
-    input_tickstamps: [u64; Input::COUNT],
-    inputs_up: [u64; Input::COUNT],
+    inputs: [u32; Input::COUNT],
+    input_tickstamps: [Tick; Input::COUNT],
+    inputs_up: [u32; Input::COUNT],
 }
 
 impl InputState {
@@ -104,7 +106,7 @@ impl InputState {
             _ => frame.is_set(code),
         }
     }
-    pub fn tick(&mut self, tick: u64, frame: FrameInputs) {
+    pub fn tick(&mut self, tick: Tick, frame: FrameInputs) {
         let rising = frame.0 & !self.previous.0;
         for i in Input::ALL {
             if rising & 1 << i as u16 != 0 {
@@ -130,10 +132,10 @@ impl InputState {
     pub fn just_released(&self, input: Input) -> bool {
         self.inputs_up[input as usize] == 1
     }
-    pub fn press_duration(&self, input: Input) -> u64 {
+    pub fn press_duration(&self, input: Input) -> u32 {
         self.inputs[input as usize]
     }
-    pub fn just_pressed_or_das(&self, input: Input, das: u64) -> bool {
+    pub fn just_pressed_or_das(&self, input: Input, das: u32) -> bool {
         self.just_pressed(input) || self.press_duration(input) > das
     }
 }

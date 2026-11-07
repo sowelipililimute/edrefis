@@ -1,21 +1,19 @@
 use std::{collections::VecDeque, time::Duration};
 
-use hecs::World;
-
-use crate::{instant::Instant, net::NetComponentRegistry};
+use crate::{instant::Instant, net::World};
 
 pub trait Endpoint: Sized {
     type Incoming;
     type Outgoing;
     type State: Default;
+    type World: World;
 
     fn handle_packet(peer: &mut Peer<Self>, packet: Self::Incoming);
 }
 
 pub struct Peer<E: Endpoint> {
-    pub world: World,
+    pub world: E::World,
     pub outgoing_packets: VecDeque<E::Outgoing>,
-    pub registry: NetComponentRegistry,
     pub state: E::State,
     time_origin: Instant,
     events: VecDeque<Event<E>>,
@@ -31,7 +29,6 @@ impl<E: Endpoint> Peer<E> {
         Peer {
             world: World::new(),
             outgoing_packets: VecDeque::new(),
-            registry: NetComponentRegistry::new_with_all_components(),
             state: E::State::default(),
             time_origin: Instant::now(),
             events: VecDeque::new(),

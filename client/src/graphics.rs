@@ -12,7 +12,7 @@ use crate::gpu::{
 };
 use glam::{Vec2, Vec3};
 use logic::{
-    field::level_to_gravity,
+    field::{Level, level_to_gravity},
     piece::Piece,
     well::{Block, BlockDirections, WELL_COLS, WELL_ROWS, Well},
 };
@@ -114,7 +114,7 @@ impl Graphics {
         let frame =
             ctx.texture_from_png(include_bytes!("gfx/frame.png"), wgpu::FilterMode::Nearest)?;
         let mut buffer = text.create_buffer();
-        Graphics::score_text(&mut buffer, text, 0, 0);
+        Graphics::score_text(&mut buffer, text, 0, Level(0));
 
         let backgrounds = BACKGROUNDS
             .iter()
@@ -132,7 +132,7 @@ impl Graphics {
         buffer: &mut glyphon::Buffer,
         text: &mut TextRenderer,
         gravity: i32,
-        level: u32,
+        level: Level,
     ) {
         let attrs = glyphon::Attrs::new()
             .family(glyphon::Family::Name("Hanken Grotesk"))
@@ -167,7 +167,7 @@ impl Graphics {
                     attrs.metrics(glyphon::Metrics::relative(24., 1.2)),
                 ),
                 (
-                    &format!("{}", level),
+                    &format!("{}", level.0),
                     attrs
                         .metrics(glyphon::Metrics::relative(32., 1.2))
                         .weight(glyphon::Weight::BOLD)
@@ -175,7 +175,7 @@ impl Graphics {
                 ),
                 (" /", attrs.metrics(glyphon::Metrics::relative(24., 1.2))),
                 (
-                    &format!("{}\n", ((level / 100) + 1) * 100),
+                    &format!("{}\n", ((level.0 / 100) + 1) * 100),
                     attrs.metrics(glyphon::Metrics::relative(24., 1.2)),
                 ),
             ],
@@ -347,8 +347,8 @@ impl Graphics {
 
         self.queue_piece(next, false, pass);
     }
-    pub fn render_background(&self, level: u32, pass: &mut Pass) {
-        let bg = &self.backgrounds[(level / 100).min(self.backgrounds.len() as u32 - 1) as usize];
+    pub fn render_background(&self, level: Level, pass: &mut Pass) {
+        let bg = &self.backgrounds[(level.0 / 100).min(self.backgrounds.len() as u32 - 1) as usize];
 
         pass.set_texture(Some(bg));
 
@@ -363,7 +363,7 @@ impl Graphics {
     }
     pub fn render(
         &mut self,
-        level: u32,
+        level: Level,
         well: &Well,
         piece: Option<&Piece>,
         next: &Piece,
@@ -399,7 +399,12 @@ impl Graphics {
         let point = pass
             .world_to_view((FRAME_SIZE * Vec2::new(0.5, -0.5) + Vec2::X).extend(0.))
             .round();
-        Graphics::score_text(&mut self.score_buffer, text, level_to_gravity(level), level);
+        Graphics::score_text(
+            &mut self.score_buffer,
+            text,
+            level_to_gravity(level.0),
+            level,
+        );
         let scale = tile_camera(Vec2::ZERO).tile_px(&pass.ctx.config) / TEXT_TILE_PX;
         text.draw_text(&mut pass, &mut self.score_buffer, point, scale)?;
 

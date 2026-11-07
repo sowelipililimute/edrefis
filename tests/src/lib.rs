@@ -2,8 +2,8 @@
 
 use client::client::{Client, ClientPeer};
 use futures_util::{SinkExt, StreamExt};
-use hecs::{Entity, World};
-use logic::net::*;
+use hecs::Entity;
+use logic::net::{World, *};
 use logic::proto::ClientToServer;
 use logic::{field::spawn_field, proto::ServerToClient};
 use nanoserde::{DeJson, SerJson};
@@ -175,18 +175,15 @@ fn make_pair() -> Pair {
 
 #[test]
 fn state_sync_basics() {
-    let mut server_world = World::new();
-    let server_field = spawn_field(&mut server_world);
-    server_world
-        .insert(server_field, (Replicated,))
-        .expect("should be able to mark it as replicated");
-    let registry = NetComponentRegistry::new_with_all_components();
+    let mut server_world = ServerWorld::new();
+    spawn_field(&mut server_world);
 
-    let states = registry.serialize_world(&mut server_world);
+    let states = server_world.serialize();
+    assert_eq!(states.entity_states.len(), 1);
 
-    let mut client_world = World::new();
-    let mut server_to_client_ids = HashMap::<u32, Entity>::new();
-    registry.apply_states(&mut client_world, &mut server_to_client_ids, &states);
+    let mut client_world = ClientWorld::new();
+    let mut server_to_client_ids = HashMap::<NetId, Entity>::new();
+    client_world.apply_states(&mut server_to_client_ids, &states);
 
     assert_eq!(server_to_client_ids.len(), 1);
 }

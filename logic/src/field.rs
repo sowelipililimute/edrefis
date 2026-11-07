@@ -2,16 +2,19 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use hecs::{Entity, World};
+use hecs::Entity;
 use nanoserde::{DeJson, SerJson};
 
 use crate::{
-    hooks::Sounds,
     input::{FrameInputs, Input, InputState, PendingInput},
+    net::World,
     piece::Piece,
     randomizer::Randomizer,
     well::Well,
 };
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, SerJson, DeJson)]
+pub struct Level(pub u32);
 
 #[derive(Debug, Clone, SerJson, DeJson)]
 pub enum GameState {
@@ -94,13 +97,13 @@ pub fn level_to_gravity(level: u32) -> i32 {
     }
 }
 
-pub fn spawn_field(world: &mut World) -> Entity {
+pub fn spawn_field<W: World>(world: &mut W) -> Entity {
     let mut randomizer = Randomizer::new();
 
     world.spawn((
         Well::new(),
         randomizer.next_piece(),
-        0u32,
+        Level(0u32),
         GameState::ActivePiece {
             piece: randomizer.next_piece(),
         },
@@ -110,17 +113,18 @@ pub fn spawn_field(world: &mut World) -> Entity {
     ))
 }
 
-pub fn set_input(world: &mut World, field: Entity, frame: FrameInputs) {
+pub fn set_input<W: World>(world: &mut W, field: Entity, frame: FrameInputs) {
     if let Ok(mut p) = world.get::<&mut PendingInput>(field) {
         p.0 = frame;
     }
 }
 
-pub fn field_system(world: &mut World, tick: u64, sounds: &mut dyn Sounds) {
+pub fn field_system<W: World>(world: &mut W) {
+    let tick = world.tick();
     for (well, next, level, state, randomizer, inputs, pending_input) in world.query_mut::<(
         &mut Well,
         &mut Piece,
-        &mut u32,
+        &mut Level,
         &mut GameState,
         &mut Randomizer,
         &mut InputState,
@@ -129,20 +133,20 @@ pub fn field_system(world: &mut World, tick: u64, sounds: &mut dyn Sounds) {
         inputs.tick(tick, pending_input.0);
 
         if inputs.just_pressed(Input::DebugLevel) {
-            *level += 50;
+            level.0 += 50;
         }
         match state {
             GameState::ActivePiece { ref mut piece } => {
                 piece.do_sonic(&well, inputs);
                 piece.do_rotate(&well, inputs);
                 piece.do_horizontal(&well, inputs);
-                piece.do_gravity(&well, inputs, level_to_gravity(*level), sounds, true);
+                piece.do_gravity(&well, inputs, level_to_gravity(level.0), true);
 
-                if piece.do_lock(well, inputs, sounds) {
+                if piece.do_lock(well, inputs) {
                     let cleared_rows = well.do_clear();
                     if cleared_rows.len() > 0 {
-                        sounds.line_clear();
-                        *level += cleared_rows.len() as u32;
+                        // sounds.line_clear();
+                        level.0 += cleared_rows.len() as u32;
 
                         let ticks_of_line_clear = 41;
                         let rows_to_lower = cleared_rows.iter().map(|x| x.0).collect::<Vec<i32>>();
@@ -181,18 +185,18 @@ pub fn field_system(world: &mut World, tick: u64, sounds: &mut dyn Sounds) {
                     } else if inputs.pressed(Input::CCW) || inputs.pressed(Input::CCW2) {
                         next.rotation = next.rotation.ccw();
                     }
-                    if *level % 100 != 99 {
-                        *level += 1;
+                    if level.0 % 100 != 99 {
+                        level.0 += 1;
                     }
                     if next.collides_with(&well, 0, 0, next.rotation) {
                         *state = GameState::GameOver {
                             ticks_remaining: 60 * 5,
                         };
                     } else {
-                        next.do_gravity(&well, inputs, level_to_gravity(*level), sounds, false);
+                        next.do_gravity(&well, inputs, level_to_gravity(level.0), false);
                         *state = GameState::ActivePiece { piece: *next };
                         *next = randomizer.next_piece();
-                        sounds.block_spawn(next.color);
+                        // sounds.block_spawn(next.color);
                     }
                 }
             }
@@ -209,7 +213,7 @@ pub fn field_system(world: &mut World, tick: u64, sounds: &mut dyn Sounds) {
                         piece: new_randomizer.next_piece(),
                     };
                     *randomizer = new_randomizer;
-                    *level = 0;
+                    level.0 = 0;
                 }
             }
         }
