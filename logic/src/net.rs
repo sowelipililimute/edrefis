@@ -188,7 +188,7 @@ impl World for ServerWorld {
 }
 
 impl ServerWorld {
-    pub fn serialize(&mut self) -> States {
+    pub fn serialize(&self, since: Option<Tick>) -> States {
         let mut states = States {
             entity_states: HashMap::new(),
         };
@@ -196,7 +196,8 @@ impl ServerWorld {
         for registration in self.registry.components.values() {
             (registration.serialize_components)(
                 registration.component_id,
-                &mut self.world,
+                since,
+                &self.world,
                 &mut states,
             );
         }
@@ -274,15 +275,26 @@ fn make_dirty_spawn_callback<TComp: Send + Sync + 'static>() -> DirtySpawnCallba
     dirty_callback::<TComp>
 }
 
-type SerializeCallback = fn(CompId, &mut hecs::World, &mut States) -> ();
+type SerializeCallback = fn(CompId, Option<Tick>, &hecs::World, &mut States) -> ();
 
 fn make_serialize_callback<TComp: SerJson + Send + Sync + 'static>() -> SerializeCallback {
     fn serialize_callback<TComp: SerJson + Send + Sync + 'static>(
         component_id: CompId,
-        world: &mut hecs::World,
+        since: Option<Tick>,
+        world: &hecs::World,
         states: &mut States,
     ) {
-        for (replicated, component) in world.query_mut::<(&Replicated, &TComp)>() {
+        for (replicated, component, tracker) in world
+            .query::<(&Replicated, &TComp, &ReplicatedComp<TComp>)>()
+            .iter()
+        {
+            if let Some(since) = since {
+                if replicated.spawned_at <= since && tracker.changed_at <= since {
+                    continue;
+                }
+            }
+
+
             let entity_components = states
                 .entity_states
                 .entry(replicated.id)

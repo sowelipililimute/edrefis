@@ -183,7 +183,7 @@ fn state_sync_basics() {
     let mut server_world = ServerWorld::new();
     spawn_field(&mut server_world);
 
-    let states = server_world.serialize();
+    let states = server_world.serialize(None);
     assert_eq!(states.entity_states.len(), 1);
 
     let mut client_world = ClientWorld::new();
@@ -232,6 +232,37 @@ fn dirty_stamps_only_mentioned_components() {
     assert_eq!(changed_at::<GameState>(&world, field), Tick(0));
     assert_eq!(changed_at::<Randomizer>(&world, field), Tick(0));
     assert_eq!(changed_at::<InputState>(&world, field), Tick(0));
+}
+
+#[test]
+fn serialize_sends_only_changes_since_baseline() {
+    let mut world = ServerWorld::new();
+    let field = spawn_field(&mut world);
+    let component_count = |states: &States| states.entity_states.values().next().unwrap().len();
+
+    assert_eq!(world.serialize(None).entity_states.len(), 1);
+    assert_eq!(component_count(&world.serialize(None)), 6);
+    assert!(world.serialize(Some(Tick(0))).entity_states.is_empty());
+
+    world.increment_tick();
+    world.dirty::<&Level>(field);
+
+    assert_eq!(component_count(&world.serialize(Some(Tick(0)))), 1);
+    assert!(world.serialize(Some(Tick(1))).entity_states.is_empty());
+    assert_eq!(component_count(&world.serialize(None)), 6);
+}
+
+#[test]
+fn serialize_sends_everything_for_entities_spawned_after_baseline() {
+    let mut world = ServerWorld::new();
+    spawn_field(&mut world);
+    world.increment_tick();
+    spawn_field(&mut world);
+
+    let states = world.serialize(Some(Tick(0)));
+
+    assert_eq!(states.entity_states.len(), 1);
+    assert_eq!(states.entity_states.values().next().unwrap().len(), 6);
 }
 
 #[test]

@@ -17,7 +17,7 @@ impl Endpoint for ServerEndpoint {
         match packet {
             ClientToServer::Join => {
                 spawn_field(&mut peer.world);
-                let states = peer.world.serialize();
+                let states = peer.world.serialize(None);
                 peer.outgoing_packets
                     .push_back((client_id, ServerToClient::States(states)));
             }
