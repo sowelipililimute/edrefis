@@ -3,8 +3,13 @@
 use client::client::{Client, ClientPeer};
 use futures_util::{SinkExt, StreamExt};
 use hecs::Entity;
+use logic::field::{GameState, Level, field_system};
+use logic::input::{InputState, PendingInput};
 use logic::net::{World, *};
+use logic::piece::Piece;
 use logic::proto::ClientToServer;
+use logic::randomizer::Randomizer;
+use logic::well::Well;
 use logic::{field::spawn_field, proto::ServerToClient};
 use nanoserde::{DeJson, SerJson};
 use server::server::Server;
@@ -186,6 +191,61 @@ fn state_sync_basics() {
     client_world.apply_states(&mut server_to_client_ids, &states);
 
     assert_eq!(server_to_client_ids.len(), 1);
+}
+
+fn changed_at<T: Send + Sync + 'static>(world: &ServerWorld, entity: Entity) -> Tick {
+    world
+        .get::<&ReplicatedComp<T>>(entity)
+        .expect("replicated component should have a tracker")
+        .changed_at
+}
+
+#[test]
+fn spawn_stamps_trackers_at_spawn_tick() {
+    let mut world = ServerWorld::new();
+    world.increment_tick();
+    world.increment_tick();
+    let field = spawn_field(&mut world);
+
+    assert_eq!(changed_at::<Well>(&world, field), Tick(2));
+    assert_eq!(changed_at::<Piece>(&world, field), Tick(2));
+    assert_eq!(changed_at::<Level>(&world, field), Tick(2));
+    assert_eq!(changed_at::<GameState>(&world, field), Tick(2));
+    assert_eq!(changed_at::<Randomizer>(&world, field), Tick(2));
+    assert_eq!(changed_at::<InputState>(&world, field), Tick(2));
+    assert!(world.get::<&ReplicatedComp<PendingInput>>(field).is_err());
+}
+
+#[test]
+fn dirty_stamps_only_mentioned_components() {
+    let mut world = ServerWorld::new();
+    let field = spawn_field(&mut world);
+    for _ in 0..3 {
+        world.increment_tick();
+    }
+
+    world.dirty::<(&Level, Option<&mut Well>, &PendingInput)>(field);
+
+    assert_eq!(changed_at::<Level>(&world, field), Tick(3));
+    assert_eq!(changed_at::<Well>(&world, field), Tick(3));
+    assert_eq!(changed_at::<Piece>(&world, field), Tick(0));
+    assert_eq!(changed_at::<GameState>(&world, field), Tick(0));
+    assert_eq!(changed_at::<Randomizer>(&world, field), Tick(0));
+    assert_eq!(changed_at::<InputState>(&world, field), Tick(0));
+}
+
+#[test]
+fn field_system_dirties_changed_components() {
+    let mut world = ServerWorld::new();
+    let field = spawn_field(&mut world);
+
+    world.increment_tick();
+    field_system(&mut world);
+
+    assert_eq!(changed_at::<GameState>(&world, field), Tick(1));
+    assert_eq!(changed_at::<InputState>(&world, field), Tick(1));
+    assert_eq!(changed_at::<Well>(&world, field), Tick(0));
+    assert_eq!(changed_at::<Randomizer>(&world, field), Tick(0));
 }
 
 #[tokio::test]

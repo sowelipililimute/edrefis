@@ -179,11 +179,9 @@ impl World for ServerWorld {
         self.tick = Tick(self.tick.0 + 1);
     }
     fn dirty<Q: hecs::Query>(&self, entity: Entity) {
-        <Q::Fetch as hecs::Fetch>::for_each_borrow(|type_id, unique| {
-            if unique {
-                if let Some(registration) = self.registry.components.get(&type_id) {
-                    (registration.dirty_existing_component)(&self.world, entity, self.tick);
-                }
+        <Q::Fetch as hecs::Fetch>::for_each_borrow(|type_id, _unique| {
+            if let Some(registration) = self.registry.components.get(&type_id) {
+                (registration.dirty_existing_component)(&self.world, entity, self.tick);
             }
         });
     }

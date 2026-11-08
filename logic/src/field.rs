@@ -135,6 +135,7 @@ pub fn field_system<W: World>(world: &mut W) {
         .iter()
     {
         inputs.tick(tick, pending_input.0);
+        world.dirty::<&InputState>(uid);
 
         if inputs.just_pressed(Input::DebugLevel) {
             level.0 += 50;
@@ -156,6 +157,7 @@ pub fn field_system<W: World>(world: &mut W) {
                     if cleared_rows.len() > 0 {
                         // sounds.line_clear();
                         level.0 += cleared_rows.len() as u32;
+                        world.dirty::<&Level>(uid);
 
                         let ticks_of_line_clear = 41;
                         let rows_to_lower = cleared_rows.iter().map(|x| x.0).collect::<Vec<i32>>();
@@ -196,6 +198,8 @@ pub fn field_system<W: World>(world: &mut W) {
                     } else if inputs.pressed(Input::CCW) || inputs.pressed(Input::CCW2) {
                         next.rotation = next.rotation.ccw();
                     }
+                    world.dirty::<&Piece>(uid);
+
                     if level.0 % 100 != 99 {
                         level.0 += 1;
                     }
@@ -208,6 +212,7 @@ pub fn field_system<W: World>(world: &mut W) {
                         *state = GameState::ActivePiece { piece: *next };
                         *next = randomizer.next_piece();
                         world.dirty::<&Piece>(uid);
+                        world.dirty::<&Randomizer>(uid);
                         // sounds.block_spawn(next.color);
                     }
                 }
