@@ -266,6 +266,87 @@ fn serialize_sends_everything_for_entities_spawned_after_baseline() {
 }
 
 #[test]
+fn despawn_sends_tombstone() {
+    let mut world = ServerWorld::new();
+    spawn_field(&mut world);
+    let doomed = spawn_field(&mut world);
+    let doomed_id = world.net_id(doomed).unwrap();
+
+    world.increment_tick();
+    world.despawn(doomed).unwrap();
+
+    let states = world.serialize(Some(Tick(0)));
+    assert!(states.entity_states.is_empty());
+    assert_eq!(states.removed, vec![(doomed_id, None)]);
+    assert!(world.serialize(Some(Tick(1))).removed.is_empty());
+    assert!(world.serialize(None).removed.is_empty());
+
+    world.trim_tombstones(Tick(1));
+    assert!(world.serialize(Some(Tick(0))).removed.is_empty());
+}
+
+#[test]
+fn remove_one_sends_tombstone_and_drops_tracker() {
+    let mut world = ServerWorld::new();
+    let field = spawn_field(&mut world);
+    let id = world.net_id(field).unwrap();
+
+    world.increment_tick();
+    world.remove_one::<Level>(field).unwrap();
+    world.remove_one::<PendingInput>(field).unwrap();
+
+    assert!(world.get::<&ReplicatedComp<Level>>(field).is_err());
+
+    let states = world.serialize(Some(Tick(0)));
+    assert_eq!(states.removed.len(), 1);
+    assert_eq!(states.removed[0].0, id);
+    assert!(states.removed[0].1.is_some());
+    assert_eq!(world.serialize(None).entity_states[&id].len(), 5);
+}
+
+#[test]
+fn client_applies_removals() {
+    let mut server = ServerWorld::new();
+    let field = spawn_field(&mut server);
+    let doomed = spawn_field(&mut server);
+    let field_id = server.net_id(field).unwrap();
+
+    let mut client = ClientWorld::new();
+    let mut ids = HashMap::<NetId, Entity>::new();
+    client.apply_states(&mut ids, &server.serialize(None));
+    assert_eq!(ids.len(), 2);
+
+    server.increment_tick();
+    server.remove_one::<Level>(field).unwrap();
+    server.despawn(doomed).unwrap();
+    client.apply_states(&mut ids, &server.serialize(Some(Tick(0))));
+
+    assert_eq!(ids.len(), 1);
+    assert_eq!(client.iter().count(), 1);
+    assert!(client.get::<&Level>(ids[&field_id]).is_err());
+    assert!(client.get::<&Well>(ids[&field_id]).is_ok());
+}
+
+#[test]
+fn client_applies_removal_before_reinsert() {
+    let mut server = ServerWorld::new();
+    let field = spawn_field(&mut server);
+    let field_id = server.net_id(field).unwrap();
+
+    let mut client = ClientWorld::new();
+    let mut ids = HashMap::<NetId, Entity>::new();
+    client.apply_states(&mut ids, &server.serialize(None));
+
+    server.increment_tick();
+    server.remove_one::<Level>(field).unwrap();
+    server.increment_tick();
+    server.insert(field, (Level(7),)).unwrap();
+    client.apply_states(&mut ids, &server.serialize(Some(Tick(0))));
+
+    assert_eq!(client.get::<&Level>(ids[&field_id]).unwrap().0, 7);
+}
+
+#[test]
 fn field_system_dirties_changed_components() {
     let mut world = ServerWorld::new();
     let field = spawn_field(&mut world);

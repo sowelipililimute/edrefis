@@ -21,6 +21,8 @@ pub trait World {
         entity: Entity,
         components: impl DynamicBundle,
     ) -> Result<(), hecs::NoSuchEntity>;
+    fn despawn(&mut self, entity: Entity) -> Result<(), hecs::NoSuchEntity>;
+    fn remove_one<T: hecs::Component>(&mut self, entity: Entity) -> Result<T, hecs::ComponentError>;
     fn get<'a, T: hecs::ComponentRef<'a>>(
         &'a self,
         entity: Entity,
@@ -61,6 +63,12 @@ impl World for ClientWorld {
     ) -> Result<(), hecs::NoSuchEntity> {
         self.world.insert(entity, components)
     }
+    fn despawn(&mut self, entity: Entity) -> Result<(), hecs::NoSuchEntity> {
+        self.world.despawn(entity)
+    }
+    fn remove_one<T: hecs::Component>(&mut self, entity: Entity) -> Result<T, hecs::ComponentError> {
+        self.world.remove_one::<T>(entity)
+    }
     fn get<'a, T: hecs::ComponentRef<'a>>(
         &'a self,
         entity: Entity,
@@ -85,6 +93,29 @@ impl ClientWorld {
         server_to_client_ids: &mut HashMap<NetId, Entity>,
         states: &States,
     ) {
+        for (suid, component) in &states.removed {
+            let Some(cuid) = server_to_client_ids.get(suid).copied() else {
+                continue;
+            };
+
+            match component {
+                None => {
+                    let _ = self.world.despawn(cuid);
+                    server_to_client_ids.remove(suid);
+                }
+                Some(component) => {
+                    if let Some(registration) = self
+                        .registry
+                        .components
+                        .values()
+                        .find(|registration| registration.component_id == *component)
+                    {
+                        (registration.remove_component)(&mut self.world, cuid);
+                    }
+                }
+            }
+        }
+
         let mut builders = HashMap::<NetId, EntityBuilder>::new();
 
         for registration in self.registry.components.values() {
@@ -112,6 +143,7 @@ pub struct ServerWorld {
     next_uid: NetId,
     tick: Tick,
     registry: NetComponentRegistry,
+    tombstones: Vec<Tombstone>,
 }
 
 impl World for ServerWorld {
@@ -121,6 +153,7 @@ impl World for ServerWorld {
             next_uid: NetId(0),
             tick: Tick(0),
             registry: NetComponentRegistry::new_with_all_components(),
+            tombstones: Vec::new(),
         }
     }
     fn spawn(&mut self, components: impl DynamicBundle) -> Entity {
@@ -163,6 +196,35 @@ impl World for ServerWorld {
 
         self.world.insert(entity, builder.build())
     }
+    fn despawn(&mut self, entity: Entity) -> Result<(), hecs::NoSuchEntity> {
+        let id = self.net_id(entity);
+        self.world.despawn(entity)?;
+
+        if let Some(id) = id {
+            self.tombstones.push(Tombstone {
+                id,
+                component: None,
+                at: self.tick,
+            });
+        }
+
+        Ok(())
+    }
+    fn remove_one<T: hecs::Component>(&mut self, entity: Entity) -> Result<T, hecs::ComponentError> {
+        let component = self.world.remove_one::<T>(entity)?;
+        let registration = self.registry.components.get(&TypeId::of::<T>());
+
+        if let (Some(id), Some(registration)) = (self.net_id(entity), registration) {
+            let _ = self.world.remove_one::<ReplicatedComp<T>>(entity);
+            self.tombstones.push(Tombstone {
+                id,
+                component: Some(registration.component_id),
+                at: self.tick,
+            });
+        }
+
+        Ok(component)
+    }
     fn get<'a, T: hecs::ComponentRef<'a>>(
         &'a self,
         entity: Entity,
@@ -188,9 +250,30 @@ impl World for ServerWorld {
 }
 
 impl ServerWorld {
+    pub fn net_id(&self, entity: Entity) -> Option<NetId> {
+        self.world
+            .get::<&Replicated>(entity)
+            .ok()
+            .map(|replicated| replicated.id)
+    }
+
+    pub fn trim_tombstones(&mut self, oldest_acked: Tick) {
+        self.tombstones.retain(|tombstone| tombstone.at > oldest_acked);
+    }
+
     pub fn serialize(&self, since: Option<Tick>) -> States {
+        let removed = match since {
+            Some(since) => self
+                .tombstones
+                .iter()
+                .filter(|tombstone| tombstone.at > since)
+                .map(|tombstone| (tombstone.id, tombstone.component))
+                .collect(),
+            None => Vec::new(),
+        };
         let mut states = States {
             entity_states: HashMap::new(),
+            removed,
         };
 
         for registration in self.registry.components.values() {
@@ -230,9 +313,17 @@ pub struct ReplicatedComp<TComp> {
     _phantom: PhantomData<TComp>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Tombstone {
+    id: NetId,
+    component: Option<CompId>,
+    at: Tick,
+}
+
 #[derive(SerJson, DeJson, Clone)]
 pub struct States {
     pub entity_states: HashMap<NetId, HashMap<CompId, String>>,
+    pub removed: Vec<(NetId, Option<CompId>)>,
 }
 
 fn hash(string: &str) -> CompId {
@@ -273,6 +364,15 @@ fn make_dirty_spawn_callback<TComp: Send + Sync + 'static>() -> DirtySpawnCallba
         });
     }
     dirty_callback::<TComp>
+}
+
+type RemoveCallback = fn(&mut hecs::World, Entity) -> ();
+
+fn make_remove_callback<TComp: Send + Sync + 'static>() -> RemoveCallback {
+    fn remove_callback<TComp: Send + Sync + 'static>(world: &mut hecs::World, entity: Entity) {
+        let _ = world.remove_one::<TComp>(entity);
+    }
+    remove_callback::<TComp>
 }
 
 type SerializeCallback = fn(CompId, Option<Tick>, &hecs::World, &mut States) -> ();
@@ -331,6 +431,7 @@ struct NetComponentRegistration {
     component_id: CompId,
     dirty_existing_component: DirtyExistingCallback,
     dirty_spawn_component: DirtySpawnCallback,
+    remove_component: RemoveCallback,
     serialize_components: SerializeCallback,
     deserialize_components: DeserializeCallback,
 }
@@ -354,6 +455,7 @@ impl NetComponentRegistry {
                 component_id: hash(name),
                 dirty_existing_component: make_dirty_existing_callback::<TComp>(),
                 dirty_spawn_component: make_dirty_spawn_callback::<TComp>(),
+                remove_component: make_remove_callback::<TComp>(),
                 serialize_components: make_serialize_callback::<TComp>(),
                 deserialize_components: make_deserialize_callback::<TComp>(),
             },
