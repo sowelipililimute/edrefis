@@ -2,13 +2,11 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashMap;
-
 use nanoserde::{DeJson, SerJson};
 
 use crate::{
     input::FrameInputs,
-    net::{CompId, NetId, States, Tick},
+    net::{States, Tick},
 };
 
 #[derive(SerJson, DeJson, Clone)]
@@ -29,11 +27,9 @@ pub enum ServerToClient {
     },
     Snapshot {
         current_tick: Tick,
-        inputs_acked_at: Tick,
-        starting_from: Tick,
-        changes: Vec<(NetId, HashMap<CompId, String>)>,
-        removed: Vec<(NetId, Option<CompId>)>,
+        inputs_acked_at: Option<Tick>,
+        starting_from: Option<Tick>,
+        states: States,
     },
-    States(States),
     Pong(u64, u32),
 }

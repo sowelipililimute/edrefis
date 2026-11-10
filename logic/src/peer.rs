@@ -9,6 +9,7 @@ pub trait Endpoint: Sized {
     type World: World;
 
     fn handle_packet(peer: &mut Peer<Self>, packet: Self::Incoming);
+    fn tick(_peer: &mut Peer<Self>) {}
 }
 
 pub struct Peer<E: Endpoint> {
@@ -54,6 +55,10 @@ impl<E: Endpoint> Peer<E> {
                 Event::DebugRun(f) => f(self),
             }
         }
+    }
+
+    pub fn tick(&mut self) {
+        E::tick(self)
     }
 
     pub fn elapsed_time(&self) -> Duration {

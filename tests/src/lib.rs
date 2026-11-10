@@ -147,6 +147,7 @@ fn make_pair() -> Pair {
                     if let Some(_) = tick {
                         let mut serv = server.lock().await;
                         serv.drain_events();
+                        serv.tick();
                         while let Some(packet) = serv.outgoing_packets.pop_front() {
                             server_ws_stream.feed(Message::Text(packet.1.serialize_json().into())).await.unwrap();
                         }
@@ -382,6 +383,58 @@ async fn client_server_basics() {
 
     pair.run_client(|client| {
         assert_eq!(client.world.iter().count(), 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn snapshots_replicate_changes_and_removals() {
+    let mut pair = make_pair();
+
+    pair.run_client(|client| client.connect()).await;
+    pair.wait_both_ticks(10).await.unwrap();
+
+    pair.run_server(|server| {
+        assert!(server.state.clients[&0].acked.is_some());
+
+        let field = server
+            .world
+            .query::<(Entity, &Replicated)>()
+            .iter()
+            .next()
+            .unwrap()
+            .0;
+        server.world.insert(field, (Level(42),)).unwrap();
+    })
+    .await;
+    pair.wait_both_ticks(10).await.unwrap();
+
+    pair.run_client(|client| {
+        let level = client.world.query::<&Level>().iter().next().unwrap().0;
+        assert_eq!(level, 42);
+    })
+    .await;
+
+    pair.run_server(|server| {
+        let field = server
+            .world
+            .query::<(Entity, &Replicated)>()
+            .iter()
+            .next()
+            .unwrap()
+            .0;
+        server.world.despawn(field).unwrap();
+    })
+    .await;
+    pair.wait_both_ticks(10).await.unwrap();
+
+    pair.run_client(|client| {
+        assert_eq!(client.world.iter().count(), 0);
+    })
+    .await;
+
+    pair.run_server(|server| {
+        assert!(server.world.serialize(Some(Tick(0))).removed.is_empty());
     })
     .await;
 }
