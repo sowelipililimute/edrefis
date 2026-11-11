@@ -4,7 +4,7 @@ use client::client::{Client, ClientPeer};
 use futures_util::{SinkExt, StreamExt};
 use hecs::Entity;
 use logic::field::{GameState, Level, field_system};
-use logic::input::{InputState, PendingInput};
+use logic::input::{FrameInputs, Input, InputState, PendingInput};
 use logic::net::{World, *};
 use logic::piece::Piece;
 use logic::proto::ClientToServer;
@@ -12,7 +12,7 @@ use logic::randomizer::Randomizer;
 use logic::well::Well;
 use logic::{field::spawn_field, proto::ServerToClient};
 use nanoserde::{DeJson, SerJson};
-use server::server::Server;
+use server::server::{HISTORY_TICKS, MAX_INPUT_LEAD, Server};
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::watch::error::RecvError;
@@ -456,4 +456,197 @@ async fn client_server_ping() {
     .await;
 
     pair.wait_both_tick().await.unwrap();
+}
+
+fn left() -> FrameInputs {
+    FrameInputs::default().with(Input::Left)
+}
+
+fn joined_server() -> Server {
+    let mut server = Server::new();
+    server.queue_packet((0, ClientToServer::Join));
+    server.drain_events();
+    server
+}
+
+fn send_inputs(server: &mut Server, starting_at: u32, ticks: Vec<FrameInputs>) {
+    server.queue_packet((
+        0,
+        ClientToServer::Inputs {
+            starting_at: Tick(starting_at),
+            ticks,
+        },
+    ));
+    server.drain_events();
+}
+
+fn run_ticks(server: &mut Server, ticks: usize) {
+    for _ in 0..ticks {
+        server.tick();
+    }
+}
+
+fn active_piece_x<W: World>(world: &W) -> i32 {
+    world
+        .query::<&GameState>()
+        .iter()
+        .find_map(|state| match state {
+            GameState::ActivePiece { piece } => Some(piece.x),
+            _ => None,
+        })
+        .expect("field should have an active piece")
+}
+
+#[test]
+fn late_input_rolls_back_to_match_on_time_input() {
+    let mut on_time = joined_server();
+    send_inputs(&mut on_time, 3, vec![left(); 4]);
+    run_ticks(&mut on_time, 10);
+
+    let mut late = joined_server();
+    run_ticks(&mut late, 8);
+    send_inputs(&mut late, 3, vec![left(); 4]);
+    run_ticks(&mut late, 2);
+
+    let mut idle = joined_server();
+    run_ticks(&mut idle, 10);
+
+    assert_eq!(on_time.state.rollbacks, 0);
+    assert_eq!(late.state.rollbacks, 1);
+    assert!(active_piece_x(&on_time.world) < active_piece_x(&idle.world));
+    assert_eq!(
+        on_time.world.serialize(None).entity_states,
+        late.world.serialize(None).entity_states
+    );
+}
+
+#[test]
+fn missing_inputs_repeat_the_last_received_input() {
+    let mut predicted = joined_server();
+    send_inputs(&mut predicted, 0, vec![left()]);
+    run_ticks(&mut predicted, 10);
+
+    let mut explicit = joined_server();
+    send_inputs(&mut explicit, 0, vec![left(); 10]);
+    run_ticks(&mut explicit, 10);
+
+    assert_eq!(
+        predicted.world.serialize(None).entity_states,
+        explicit.world.serialize(None).entity_states
+    );
+}
+
+#[test]
+fn late_input_matching_prediction_does_not_roll_back() {
+    let mut server = joined_server();
+    send_inputs(&mut server, 0, vec![left()]);
+    run_ticks(&mut server, 6);
+    send_inputs(&mut server, 1, vec![left(); 4]);
+    run_ticks(&mut server, 2);
+
+    assert_eq!(server.state.rollbacks, 0);
+    assert_eq!(server.state.clients[&0].inputs_acked_at(), Some(Tick(4)));
+}
+
+#[test]
+fn rollback_resends_corrected_state_to_acked_clients() {
+    let mut server = joined_server();
+    run_ticks(&mut server, 8);
+    server.queue_packet((0, ClientToServer::Ack(Tick(7))));
+    server.drain_events();
+    send_inputs(&mut server, 3, vec![left(); 4]);
+    server.outgoing_packets.clear();
+    run_ticks(&mut server, 1);
+
+    let Some((_, ServerToClient::Snapshot {
+        starting_from,
+        states,
+        ..
+    })) = server.outgoing_packets.pop_back()
+    else {
+        panic!("expected a snapshot");
+    };
+    assert_eq!(starting_from, Some(Tick(7)));
+    assert_eq!(states.entity_states.values().next().unwrap().len(), 6);
+}
+
+#[test]
+fn inputs_older_than_history_replay_from_oldest_snapshot() {
+    let mut server = joined_server();
+    run_ticks(&mut server, HISTORY_TICKS + 10);
+    send_inputs(&mut server, 0, vec![left()]);
+    run_ticks(&mut server, 1);
+
+    assert_eq!(server.state.rollbacks, 1);
+    assert_eq!(server.state.clients[&0].inputs_acked_at(), Some(Tick(0)));
+}
+
+#[test]
+fn inputs_too_far_ahead_are_dropped() {
+    let mut server = joined_server();
+    send_inputs(&mut server, MAX_INPUT_LEAD + 1, vec![left()]);
+
+    assert_eq!(server.state.clients[&0].inputs_acked_at(), None);
+}
+
+#[test]
+fn client_stamps_inputs_ahead_of_server_and_trims_acked() {
+    let snapshot = |current_tick: u32, inputs_acked_at: Option<u32>| ServerToClient::Snapshot {
+        current_tick: Tick(current_tick),
+        inputs_acked_at: inputs_acked_at.map(Tick),
+        starting_from: None,
+        states: States {
+            entity_states: HashMap::new(),
+            removed: Vec::new(),
+        },
+    };
+    let last_inputs = |client: &mut Client| match client.outgoing_packets.pop_back() {
+        Some(ClientToServer::Inputs { starting_at, ticks }) => (starting_at, ticks.len()),
+        _ => panic!("expected inputs"),
+    };
+
+    let mut client = Client::new();
+    client.send_input(left());
+    assert!(client.outgoing_packets.is_empty());
+
+    client.queue_packet(snapshot(10, None));
+    client.drain_events();
+    client.send_input(left());
+    client.send_input(left());
+    assert_eq!(last_inputs(&mut client), (Tick(13), 2));
+
+    client.queue_packet(snapshot(11, Some(13)));
+    client.drain_events();
+    client.send_input(left());
+    assert_eq!(last_inputs(&mut client), (Tick(14), 2));
+
+    client.queue_packet(snapshot(20, None));
+    client.drain_events();
+    client.send_input(left());
+    assert_eq!(last_inputs(&mut client), (Tick(23), 1));
+}
+
+#[tokio::test]
+async fn client_inputs_drive_server_field() {
+    let mut pair = make_pair();
+
+    pair.run_client(|client| client.connect()).await;
+    pair.wait_both_ticks(5).await.unwrap();
+
+    let (start_tx, start_rx) = oneshot::channel();
+    pair.run_server(move |server| {
+        start_tx.send(active_piece_x(&server.world)).unwrap();
+    })
+    .await;
+    let start_x = start_rx.await.unwrap();
+
+    pair.run_client(|client| client.send_input(left())).await;
+    pair.wait_both_ticks(10).await.unwrap();
+
+    let (end_tx, end_rx) = oneshot::channel();
+    pair.run_server(move |server| {
+        end_tx.send(active_piece_x(&server.world)).unwrap();
+    })
+    .await;
+    assert!(end_rx.await.unwrap() < start_x);
 }

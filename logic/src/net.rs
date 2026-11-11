@@ -1,4 +1,8 @@
-use std::{any::TypeId, collections::HashMap, marker::PhantomData};
+use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
+    marker::PhantomData,
+};
 
 use hecs::{DynamicBundle, Entity, EntityBuilder};
 use nanoserde::{DeJson, SerJson};
@@ -22,13 +26,15 @@ pub trait World {
         components: impl DynamicBundle,
     ) -> Result<(), hecs::NoSuchEntity>;
     fn despawn(&mut self, entity: Entity) -> Result<(), hecs::NoSuchEntity>;
-    fn remove_one<T: hecs::Component>(&mut self, entity: Entity) -> Result<T, hecs::ComponentError>;
+    fn remove_one<T: hecs::Component>(&mut self, entity: Entity)
+        -> Result<T, hecs::ComponentError>;
     fn get<'a, T: hecs::ComponentRef<'a>>(
         &'a self,
         entity: Entity,
     ) -> Result<T::Ref, hecs::ComponentError>;
     fn iter(&self) -> hecs::Iter<'_>;
     fn tick(&self) -> Tick;
+    fn set_tick(&mut self, tick: Tick);
     fn increment_tick(&mut self);
     fn dirty<Q: hecs::Query>(&self, entity: Entity);
 }
@@ -66,7 +72,10 @@ impl World for ClientWorld {
     fn despawn(&mut self, entity: Entity) -> Result<(), hecs::NoSuchEntity> {
         self.world.despawn(entity)
     }
-    fn remove_one<T: hecs::Component>(&mut self, entity: Entity) -> Result<T, hecs::ComponentError> {
+    fn remove_one<T: hecs::Component>(
+        &mut self,
+        entity: Entity,
+    ) -> Result<T, hecs::ComponentError> {
         self.world.remove_one::<T>(entity)
     }
     fn get<'a, T: hecs::ComponentRef<'a>>(
@@ -80,6 +89,9 @@ impl World for ClientWorld {
     }
     fn tick(&self) -> Tick {
         self.tick
+    }
+    fn set_tick(&mut self, tick: Tick) {
+        self.tick = tick;
     }
     fn increment_tick(&mut self) {
         self.tick = Tick(self.tick.0 + 1);
@@ -210,7 +222,10 @@ impl World for ServerWorld {
 
         Ok(())
     }
-    fn remove_one<T: hecs::Component>(&mut self, entity: Entity) -> Result<T, hecs::ComponentError> {
+    fn remove_one<T: hecs::Component>(
+        &mut self,
+        entity: Entity,
+    ) -> Result<T, hecs::ComponentError> {
         let component = self.world.remove_one::<T>(entity)?;
         let registration = self.registry.components.get(&TypeId::of::<T>());
 
@@ -237,6 +252,9 @@ impl World for ServerWorld {
     fn tick(&self) -> Tick {
         self.tick
     }
+    fn set_tick(&mut self, tick: Tick) {
+        self.tick = tick;
+    }
     fn increment_tick(&mut self) {
         self.tick = Tick(self.tick.0 + 1);
     }
@@ -258,7 +276,57 @@ impl ServerWorld {
     }
 
     pub fn trim_tombstones(&mut self, oldest_acked: Tick) {
-        self.tombstones.retain(|tombstone| tombstone.at > oldest_acked);
+        self.tombstones
+            .retain(|tombstone| tombstone.at > oldest_acked);
+    }
+
+    fn replicated_entities(&self) -> Vec<Entity> {
+        let mut entities: Vec<Entity> = self
+            .world
+            .query::<(Entity, &Replicated)>()
+            .iter()
+            .map(|(entity, _)| entity)
+            .collect();
+        entities.sort_by_key(|entity| entity.to_bits());
+        entities
+    }
+
+    pub fn snapshot(&self) -> WorldSnapshot {
+        WorldSnapshot {
+            tick: self.tick,
+            entities: self.replicated_entities(),
+            components: self
+                .registry
+                .components
+                .iter()
+                .map(|(type_id, registration)| {
+                    (*type_id, (registration.snapshot_components)(&self.world))
+                })
+                .collect(),
+        }
+    }
+
+    pub fn restore(&mut self, snapshot: &WorldSnapshot) -> bool {
+        if snapshot.entities != self.replicated_entities() {
+            return false;
+        }
+
+        for (type_id, components) in &snapshot.components {
+            if let Some(registration) = self.registry.components.get(type_id) {
+                (registration.restore_components)(&mut self.world, components.as_ref());
+            }
+        }
+        self.tick = snapshot.tick;
+
+        true
+    }
+
+    pub fn dirty_all(&self) {
+        for entity in self.replicated_entities() {
+            for registration in self.registry.components.values() {
+                (registration.dirty_existing_component)(&self.world, entity, self.tick);
+            }
+        }
     }
 
     pub fn serialize(&self, since: Option<Tick>) -> States {
@@ -320,6 +388,12 @@ struct Tombstone {
     at: Tick,
 }
 
+pub struct WorldSnapshot {
+    pub tick: Tick,
+    entities: Vec<Entity>,
+    components: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+}
+
 #[derive(SerJson, DeJson, Clone)]
 pub struct States {
     pub entity_states: HashMap<NetId, HashMap<CompId, String>>,
@@ -375,6 +449,43 @@ fn make_remove_callback<TComp: Send + Sync + 'static>() -> RemoveCallback {
     remove_callback::<TComp>
 }
 
+type SnapshotCallback = fn(&hecs::World) -> Box<dyn Any + Send + Sync>;
+
+fn make_snapshot_callback<TComp: Clone + Send + Sync + 'static>() -> SnapshotCallback {
+    fn snapshot_callback<TComp: Clone + Send + Sync + 'static>(
+        world: &hecs::World,
+    ) -> Box<dyn Any + Send + Sync> {
+        let components: Vec<(Entity, TComp)> = world
+            .query::<(Entity, &TComp)>()
+            .with::<&Replicated>()
+            .iter()
+            .map(|(entity, component)| (entity, component.clone()))
+            .collect();
+        Box::new(components)
+    }
+    snapshot_callback::<TComp>
+}
+
+type RestoreCallback = fn(&mut hecs::World, &(dyn Any + Send + Sync)) -> ();
+
+fn make_restore_callback<TComp: Clone + Send + Sync + 'static>() -> RestoreCallback {
+    fn restore_callback<TComp: Clone + Send + Sync + 'static>(
+        world: &mut hecs::World,
+        components: &(dyn Any + Send + Sync),
+    ) {
+        let Some(components) = components.downcast_ref::<Vec<(Entity, TComp)>>() else {
+            return;
+        };
+
+        for (entity, component) in components {
+            if let Ok(mut current) = world.get::<&mut TComp>(*entity) {
+                *current = component.clone();
+            }
+        }
+    }
+    restore_callback::<TComp>
+}
+
 type SerializeCallback = fn(CompId, Option<Tick>, &hecs::World, &mut States) -> ();
 
 fn make_serialize_callback<TComp: SerJson + Send + Sync + 'static>() -> SerializeCallback {
@@ -393,7 +504,6 @@ fn make_serialize_callback<TComp: SerJson + Send + Sync + 'static>() -> Serializ
                     continue;
                 }
             }
-
 
             let entity_components = states
                 .entity_states
@@ -432,6 +542,8 @@ struct NetComponentRegistration {
     dirty_existing_component: DirtyExistingCallback,
     dirty_spawn_component: DirtySpawnCallback,
     remove_component: RemoveCallback,
+    snapshot_components: SnapshotCallback,
+    restore_components: RestoreCallback,
     serialize_components: SerializeCallback,
     deserialize_components: DeserializeCallback,
 }
@@ -448,7 +560,7 @@ impl NetComponentRegistry {
         }
     }
 
-    fn register<TComp: SerJson + DeJson + Send + Sync + 'static>(&mut self, name: &str) {
+    fn register<TComp: SerJson + DeJson + Clone + Send + Sync + 'static>(&mut self, name: &str) {
         self.components.insert(
             TypeId::of::<TComp>(),
             NetComponentRegistration {
@@ -456,6 +568,8 @@ impl NetComponentRegistry {
                 dirty_existing_component: make_dirty_existing_callback::<TComp>(),
                 dirty_spawn_component: make_dirty_spawn_callback::<TComp>(),
                 remove_component: make_remove_callback::<TComp>(),
+                snapshot_components: make_snapshot_callback::<TComp>(),
+                restore_components: make_restore_callback::<TComp>(),
                 serialize_components: make_serialize_callback::<TComp>(),
                 deserialize_components: make_deserialize_callback::<TComp>(),
             },

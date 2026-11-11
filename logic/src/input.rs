@@ -37,7 +37,7 @@ impl Input {
     ];
 }
 
-#[derive(Debug, Default, Copy, Clone, SerJson, DeJson)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, SerJson, DeJson)]
 #[repr(transparent)]
 pub struct FrameInputs(u16);
 
